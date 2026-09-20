@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# generated code (OpenAPI DTOs, Kysely schema) — run `pnpm codegen`
+.generated/
+
+# local env
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

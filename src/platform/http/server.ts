@@ -1,0 +1,46 @@
+import path from 'node:path';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import openapiGlue from 'fastify-openapi-glue';
+import type { AwilixContainer } from 'awilix';
+import type { Cradle } from '../container';
+import { buildPaymentApi } from '../../payments/adapter/http/incoming/PaymentApiImpl';
+import { AccountNotFoundError, DomainError } from '../../payments/domain/Errors';
+
+const SPEC_PATH = path.resolve(process.cwd(), 'openapi/openapi.yaml');
+
+function problem(status: number, title: string, detail: string) {
+  return { type: 'about:blank', title, status, detail };
+}
+
+export async function buildServer(container: AwilixContainer<Cradle>): Promise<FastifyInstance> {
+  const app = Fastify({ logger: true }); // Fastify bundles pino for structured logs.
+
+  const service = {
+    ...buildPaymentApi(container),
+    async healthCheck(_request: FastifyRequest, reply: FastifyReply): Promise<void> {
+      await reply.code(200).send({ status: 'ok' });
+    },
+  };
+
+  await app.register(openapiGlue, {
+    specification: SPEC_PATH,
+    service,
+    prefix: '/api/v1',
+  });
+
+  app.setErrorHandler((err, request, reply) => {
+    if (err instanceof AccountNotFoundError) {
+      return reply.code(404).type('application/problem+json').send(problem(404, 'Account not found', err.message));
+    }
+    if (err instanceof DomainError) {
+      return reply.code(422).type('application/problem+json').send(problem(422, 'Domain rule violated', err.message));
+    }
+    if ((err as { validation?: unknown }).validation) {
+      return reply.code(400).type('application/problem+json').send(problem(400, 'Invalid request', (err as Error).message));
+    }
+    request.log.error(err);
+    return reply.code(500).type('application/problem+json').send(problem(500, 'Internal Server Error', 'Unexpected error'));
+  });
+
+  return app;
+}

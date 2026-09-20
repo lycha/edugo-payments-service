@@ -1,0 +1,49 @@
+{
+  "name": "edugo-payments-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#generated/*": "./.generated/*"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "codegen:openapi": "openapi-typescript openapi/openapi.yaml -o .generated/payments/adapter/http/incoming/openapi.ts",
+    "codegen:db": "kysely-codegen --dialect postgres --url $DATABASE_URL --out-file .generated/platform/db/schema.ts",
+    "codegen": "pnpm codegen:openapi && pnpm codegen:db",
+    "db:migrate": "node-pg-migrate up -m db/migrations",
+    "db:migrate:down": "node-pg-migrate down -m db/migrations",
+    "db:migrate:create": "node-pg-migrate create -m db/migrations --migration-file-language sql"
+  },
+  "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "^0.52.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.54.0",
+    "@opentelemetry/sdk-node": "^0.54.0",
+    "awilix": "^12.0.4",
+    "fastify": "^5.1.0",
+    "fastify-openapi-glue": "^4.9.0",
+    "kysely": "^0.27.4",
+    "pg": "^8.13.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^10.13.2",
+    "@types/node": "^22.9.0",
+    "@types/pg": "^8.11.10",
+    "kysely-codegen": "^0.17.0",
+    "node-pg-migrate": "^7.7.1",
+    "openapi-typescript": "^7.4.2",
+    "testcontainers": "^10.13.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

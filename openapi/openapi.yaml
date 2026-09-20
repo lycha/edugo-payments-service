@@ -1,0 +1,136 @@
+openapi: 3.0.3
+info:
+  title: EduGo Payments Service
+  version: 0.1.0
+  description: >
+    Payments module. This handwritten contract is the source of truth: DTO types
+    are generated from it (openapi-typescript) and routes are wired by operationId
+    (fastify-openapi-glue) with request/response validation from these schemas.
+servers:
+  - url: /api/v1
+
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Liveness probe
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /payments:
+    post:
+      operationId: recordPayment
+      summary: Record a payment against an account
+      description: >
+        Appends a PAYMENT ledger entry and updates the account balance atomically.
+        Idempotent via the Idempotency-Key header — repeating the same key returns
+        the original result without posting a second entry.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordPaymentRequest'
+      responses:
+        '201':
+          description: Payment recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRecorded'
+        '200':
+          description: Idempotent replay — payment already recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRecorded'
+        '404':
+          description: Account not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Domain rule violation
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client-generated key that makes this operation exactly-once.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 200
+
+  schemas:
+    RecordPaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [accountId, amountMinor, currency]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        amountMinor:
+          type: integer
+          minimum: 1
+          description: Amount in minor units (grosze).
+        currency:
+          type: string
+          enum: [PLN]
+        operatorReference:
+          type: string
+          description: Reference at the payment operator (e.g. transaction id).
+
+    PaymentRecorded:
+      type: object
+      additionalProperties: false
+      required: [paymentId, accountId, balanceMinor, currency, replayed]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        balanceMinor:
+          type: integer
+          description: Account balance after the payment, in minor units.
+        currency:
+          type: string
+        replayed:
+          type: boolean
+          description: True when this response is an idempotent replay.
+
+    Problem:
+      type: object
+      description: RFC 9457 problem detail.
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
