@@ -1,0 +1,151 @@
+# feature-inventory.yaml — schema and worked example
+#
+# Every entry carries `evidence` (where in the source it came from) and
+# `confidence` (observed = literally in the markup; implied = you reasoned).
+# Implied entries are review targets, not facts.
+
+meta:
+  feature: string                    # short slug, e.g. shared-standup-notes
+  context: string                    # bounded context this belongs to
+  source:
+    kind: html | figma               # what was harvested
+    repo: string                     # e.g. standin-design
+    commit: string                   # REQUIRED — full SHA, never a placeholder
+    files: [string]                  # paths harvested
+  glossary: string | null            # path to glossary.md, or null if absent
+  harvested_at: iso8601
+
+# ---------------------------------------------------------------------------
+
+screens:
+  - id: SCR-1                        # stable, referenced everywhere else
+    name: string
+    purpose: string                  # one line, what this view is for
+    evidence: string                 # selector / node id / file:line
+
+states:
+  - id: SCR-1-S1
+    screen: SCR-1
+    kind: default | empty | loading | error | success | partial | disabled
+    description: string
+    evidence: string
+    confidence: observed | implied
+
+interactions:
+  - id: INT-1
+    screen: SCR-1
+    control: button | link | form | input | drag | menu | other
+    label: string                    # visible text, verbatim
+    action: string                   # what it appears to do — descriptive, not prescriptive
+    destination: SCR-2 | external | unknown
+    enabled_when: string | not-observable
+    evidence: string
+    confidence: observed | implied
+
+data:
+  - id: DAT-1
+    screen: SCR-1
+    label: string                    # as shown in the UI, verbatim
+    glossary_term: string | UNMAPPED # vocabulary drift shows up here
+    kind: display | input | both
+    format: text | number | date | datetime | currency | count | enum | file | other
+    constraints_visible: [string]    # required marker, maxlength, pattern, min/max
+    sample_values: [string]          # what the prototype shows — likely filler
+    evidence: string
+    confidence: observed | implied
+
+transitions:
+  - id: TRN-1
+    from: SCR-1-S1
+    to: SCR-2-S1
+    trigger: INT-1
+    evidence: string
+    confidence: observed | implied
+
+# ---------------------------------------------------------------------------
+# The point of the exercise. See reference/absence-checklist.md.
+# Every checklist category appears here — either with findings, or explicitly
+# marked none-found with a reason.
+
+absences:
+  - id: ABS-1
+    category: >
+      empty-state | error-state | loading-state | permission | concurrency |
+      boundary | lifecycle | notification | time | offline | accessibility |
+      role-variation | undo
+    description: string              # what is not shown
+    affects: [SCR-1]
+    severity: blocking | high | normal
+                                     # blocking = an agent cannot implement without deciding this
+
+  - id: ABS-n
+    category: offline
+    description: none-found
+    reason: string                   # why this category does not apply here
+
+# Things you could not even frame as an absence — genuine unknowns.
+questions:
+  - id: Q-1
+    question: string
+    context: string                  # why this matters
+    blocks: [ABS-1]                  # absences that cannot be resolved until this is answered
+
+# Placeholder content that must NOT be implemented. Feeds the agent handoff
+# prompt directly — agents cannot distinguish design intent from filler.
+filler:
+  - id: FIL-1
+    description: string              # "three hardcoded users in the member list"
+    evidence: string
+
+# ---------------------------------------------------------------------------
+# WORKED FRAGMENT — illustrative only
+# ---------------------------------------------------------------------------
+#
+# screens:
+#   - id: SCR-1
+#     name: Standup digest
+#     purpose: Shows what teammates posted since the viewer was last active
+#     evidence: prototype/digest.html
+#
+# states:
+#   - id: SCR-1-S1
+#     screen: SCR-1
+#     kind: default
+#     description: Populated list of four teammate entries
+#     evidence: "prototype/digest.html:.digest-list"
+#     confidence: observed
+#
+# data:
+#   - id: DAT-3
+#     screen: SCR-1
+#     label: "2 hours ago"
+#     glossary_term: UNMAPPED
+#     kind: display
+#     format: datetime
+#     constraints_visible: []
+#     sample_values: ["2 hours ago", "yesterday"]
+#     evidence: "prototype/digest.html:.entry-time"
+#     confidence: observed
+#
+# absences:
+#   - id: ABS-4
+#     category: time
+#     description: >
+#       Relative timestamps are shown but the reference point is undefined —
+#       viewer local time, author local time, or team-canonical timezone.
+#       Also undefined: the cutoff after which relative flips to absolute.
+#     affects: [SCR-1]
+#     severity: blocking
+#
+#   - id: ABS-5
+#     category: concurrency
+#     description: >
+#       No state shown for an entry edited by its author while the viewer has
+#       the digest open. Prototype shows a single static snapshot.
+#     affects: [SCR-1]
+#     severity: blocking
+#
+# filler:
+#   - id: FIL-1
+#     description: Four hardcoded teammate entries with placeholder avatars
+#     evidence: "prototype/digest.html:.digest-list > .entry"
