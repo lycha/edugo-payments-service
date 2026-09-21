@@ -26,3 +26,11 @@ assumptions:
     source: decisions.yaml#Q-6, decisions.yaml#ABS-8
     captured_at: 2026-09-21
     status: open
+
+  - id: ASM-4
+    feature: payments
+    statement: "EduGo operates a central IdP that issues OIDC/JWT access tokens carrying sub, role, and acr/MFA claims, and exposes a JWKS endpoint — the actor-identity source ADR-0004 depends on."
+    revisit_when: "confirm the platform's IdP + claim set with the platform team BEFORE implementing API auth (ADR-0004)"
+    source: docs/adr/0004-api-auth.md
+    captured_at: 2026-09-21
+    status: open   # CTO did not have this information at decision time
