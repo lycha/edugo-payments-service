@@ -1,0 +1,584 @@
+# feature-inventory.yaml
+#
+# SOURCE-TYPE NOTE (read first):
+# This harvest was run against a PRD (docs/prd.md), NOT a prototype. A PRD is the
+# inverse of a prototype: a prototype under-specifies (shows one happy path, hides
+# the rest) while a PRD over-states (declares goals, FRs, invariants, but shows no
+# UI). Consequences for this inventory:
+#   - screens / states / interactions / filler are none-found — the source has no
+#     markup, views, controls, or hardcoded sample content to observe.
+#   - `evidence` points to docs/prd.md:<line-or-section>, not selectors/nodes.
+#   - The value of this run is `data` (candidate entities), `transitions` (the
+#     lifecycle state machine the PRD implies), and above all `absences` /
+#     `questions` — what the PRD leaves undecided that an agent will otherwise invent.
+#   - transition/state ids are DOMAIN-level (e.g. CHG-PENDING), not screen-level,
+#     because there are no screens to anchor them to.
+# confidence: observed = the term/rule is literally written in the PRD;
+#             implied  = reasoned from the PRD (a review target, not a fact).
+
+meta:
+  feature: payments
+  context: payments
+  source:
+    kind: prd                          # NOTE: not html|figma — see SOURCE-TYPE NOTE above
+    repo: edugo-payments-service
+    commit: 74d22fea62a7c95008501e9ccbe1468021b05f7c
+    files: [docs/prd.md]
+  glossary: null                       # no glossary.md found in the payments context — flagged
+  harvested_at: 2026-09-20T17:33:49Z
+
+# ---------------------------------------------------------------------------
+# No UI in the source. These four sections are explicitly none-found, not skipped.
+
+screens:
+  - id: SCR-NONE
+    name: none-found
+    purpose: >
+      Source is a text PRD with no views, wireframes, or rendered markup. Personas
+      (parent, admin, accounting) imply front-ends exist, but none are observable
+      here. Front-end screens are also out of scope for this repo, which is a
+      backend payments service (API + ledger).
+    evidence: "docs/prd.md:54-60 (personas listed; no views defined)"
+
+states: []                             # no screens → no screen states to observe
+interactions: []                       # no controls/markup in the source
+filler: []                             # a text PRD has no hardcoded sample UI content to flag
+
+# ---------------------------------------------------------------------------
+# Candidate entities / attributes implied by the PRD. `screen: null` throughout
+# (no UI). These feed schema + contract definition downstream.
+
+data:
+  - id: DAT-1
+    screen: null
+    label: "ledger entry"
+    glossary_term: UNMAPPED
+    kind: both
+    format: enum
+    constraints_visible:
+      - "append-only; corrections are new reversing entries only (INV-4, FR-7)"
+      - "entry types named across PRD: charge, payment, refund, partial refund, discount, late-payment interest, adjustment/correction, credit/overpayment, fee, chargeback"
+    sample_values: ["CHARGE", "PAYMENT", "REFUND", "PARTIAL_REFUND", "DISCOUNT", "LATE_FEE", "ADJUSTMENT", "CREDIT", "FEE", "CHARGEBACK"]
+    evidence: "docs/prd.md:104-107 (FR-7/FR-8), 110-113 (FR-10/11/12), 160 (INV-4)"
+    confidence: observed
+  - id: DAT-2
+    screen: null
+    label: "amount (minor units / grosze or cents)"
+    glossary_term: UNMAPPED
+    kind: both
+    format: currency
+    constraints_visible:
+      - "integer minor units, never floats (NFR-10)"
+      - "signed on ledger entries (reversing entries imply negatives)"
+    sample_values: []
+    evidence: "docs/prd.md:142 (NFR-10)"
+    confidence: observed
+  - id: DAT-3
+    screen: null
+    label: "materialized balance"
+    glossary_term: UNMAPPED
+    kind: display
+    format: currency
+    constraints_visible:
+      - "balance == Σ ledger entries, updated atomically (FR-8, INV-1)"
+      - "read latency p95<100ms (NFR-2)"
+    sample_values: []
+    evidence: "docs/prd.md:105 (FR-8), 157 (INV-1), 134 (NFR-2)"
+    confidence: observed
+  - id: DAT-4
+    screen: null
+    label: "currency"
+    glossary_term: UNMAPPED
+    kind: both
+    format: enum
+    constraints_visible: ["PLN only this iteration (A4); multi-currency is a non-goal"]
+    sample_values: ["PLN"]
+    evidence: "docs/prd.md:42 (non-goal), 78 (A4)"
+    confidence: observed
+  - id: DAT-5
+    screen: null
+    label: "subscription"
+    glossary_term: UNMAPPED
+    kind: both
+    format: other
+    constraints_visible:
+      - "fixed monthly fee per subscription (A5)"
+      - "prorated to actual usage on cancellation (A5, FR-3)"
+      - "same billing day for all except first month (A6)"
+    sample_values: []
+    evidence: "docs/prd.md:79 (A5), 80 (A6), 93-95 (FR-1/2/3)"
+    confidence: observed
+  - id: DAT-6
+    screen: null
+    label: "charge"
+    glossary_term: UNMAPPED
+    kind: both
+    format: other
+    constraints_visible:
+      - "monthly per active subscription on billing day (FR-1)"
+      - "mid-month enrollment → prorated first charge (FR-2)"
+      - "new order triggers first charge; billing run generates subsequent (A7)"
+      - "never double-paid; over-allocation becomes credit (INV-5)"
+    sample_values: []
+    evidence: "docs/prd.md:81 (A7), 93-95 (FR-1/2/3), 161 (INV-5)"
+    confidence: observed
+  - id: DAT-7
+    screen: null
+    label: "stored payment method / token / mandate (card-on-file)"
+    glossary_term: UNMAPPED
+    kind: both
+    format: other
+    constraints_visible:
+      - "card data tokenized at operator; store tokens/mandates only (A11, NFR-6, DD-6)"
+      - "PCI SAQ-A"
+    sample_values: []
+    evidence: "docs/prd.md:85 (A11), 138 (NFR-6), 151 (DD-6)"
+    confidence: observed
+  - id: DAT-8
+    screen: null
+    label: "SCA/PSD2 authentication flag (CIT vs MIT)"
+    glossary_term: UNMAPPED
+    kind: input
+    format: enum
+    constraints_visible: ["first payment CIT/SCA; subsequent recurring MIT (FR-4, NFR-6)"]
+    sample_values: ["CIT", "MIT"]
+    evidence: "docs/prd.md:99 (FR-4), 138 (NFR-6)"
+    confidence: observed
+  - id: DAT-9
+    screen: null
+    label: "payment (push vs pull)"
+    glossary_term: UNMAPPED
+    kind: both
+    format: enum
+    constraints_visible:
+      - "pull = auto-charge stored method (FR-4)"
+      - "push = parent-initiated via hosted page/redirect (FR-5)"
+    sample_values: ["PUSH", "PULL"]
+    evidence: "docs/prd.md:99-100 (FR-4/FR-5)"
+    confidence: observed
+  - id: DAT-10
+    screen: null
+    label: "idempotency key"
+    glossary_term: UNMAPPED
+    kind: input
+    format: text
+    constraints_visible:
+      - "unique; duplicate → no-op (DD-2)"
+      - "covers both user actions and operator notifications, exactly-once effect (FR-6, INV-2)"
+    sample_values: []
+    evidence: "docs/prd.md:101 (FR-6), 147 (DD-2), 158 (INV-2)"
+    confidence: observed
+  - id: DAT-11
+    screen: null
+    label: "operator event / webhook notification"
+    glossary_term: UNMAPPED
+    kind: input
+    format: other
+    constraints_visible:
+      - "HMAC-verified → enqueued → transactional worker (DD-2)"
+      - "out-of-order tolerant; applied at most once (INV-2)"
+      - "no payment recorded without matching operator confirmation (INV-3)"
+    sample_values: []
+    evidence: "docs/prd.md:147 (DD-2), 158-159 (INV-2/INV-3)"
+    confidence: observed
+  - id: DAT-12
+    screen: null
+    label: "payment allocation"
+    glossary_term: UNMAPPED
+    kind: both
+    format: other
+    constraints_visible: ["allocated across multiple charges; partial payments oldest-first (FR-9)"]
+    sample_values: []
+    evidence: "docs/prd.md:107 (FR-9)"
+    confidence: observed
+  - id: DAT-13
+    screen: null
+    label: "credit / wallet (overpayment)"
+    glossary_term: UNMAPPED
+    kind: both
+    format: currency
+    constraints_visible: ["over-allocation becomes credit (INV-5); overpayments held as credit/wallet (FR-12)"]
+    sample_values: []
+    evidence: "docs/prd.md:112 (FR-12), 161 (INV-5)"
+    confidence: observed
+  - id: DAT-14
+    screen: null
+    label: "dunning state / access block"
+    glossary_term: UNMAPPED
+    kind: both
+    format: enum
+    constraints_visible:
+      - "failed/overdue → automated comms → access block; recovery on payment (FR-13, A8)"
+    sample_values: []
+    evidence: "docs/prd.md:82 (A8), 117 (FR-13)"
+    confidence: observed
+  - id: DAT-15
+    screen: null
+    label: "invoice"
+    glossary_term: UNMAPPED
+    kind: both
+    format: file
+    constraints_visible:
+      - "on demand (A9, FR-14)"
+      - "handed off to accounting SALDEO → KSeF (A10, FR-14, DD-7)"
+    sample_values: []
+    evidence: "docs/prd.md:83-84 (A9/A10), 121 (FR-14), 152 (DD-7)"
+    confidence: observed
+  - id: DAT-16
+    screen: null
+    label: "settlement / payout (reconciliation)"
+    glossary_term: UNMAPPED
+    kind: input
+    format: other
+    constraints_visible:
+      - "daily settlement ingest (FR-15, DD-3)"
+      - "three-way match: ledger ↔ operator status ↔ payout"
+      - "operator fees recorded as separate ledger entries"
+      - "mismatches → back-office queue + alert; drift detected ≤24h (NFR success metric)"
+    sample_values: []
+    evidence: "docs/prd.md:125 (FR-15), 148 (DD-3), 50 (drift ≤24h)"
+    confidence: observed
+  - id: DAT-17
+    screen: null
+    label: "operator (multi-operator routing)"
+    glossary_term: UNMAPPED
+    kind: both
+    format: enum
+    constraints_visible: ["operator abstraction + cost-based routing (FR-16, DD-5)"]
+    sample_values: ["PayU", "Tpay", "Stripe"]
+    evidence: "docs/prd.md:129 (FR-16), 150 (DD-5)"
+    confidence: observed
+  - id: DAT-18
+    screen: null
+    label: "role (RBAC)"
+    glossary_term: UNMAPPED
+    kind: input
+    format: enum
+    constraints_visible: ["RBAC + MFA + segregation of duties (NFR-6)"]
+    sample_values: ["Parent", "Student (minor, non-payer)", "Admin/back-office", "Accounting"]
+    evidence: "docs/prd.md:54-60 (personas), 138 (NFR-6)"
+    confidence: observed
+  - id: DAT-19
+    screen: null
+    label: "audit log entry / correlation id"
+    glossary_term: UNMAPPED
+    kind: display
+    format: other
+    constraints_visible: ["immutable audit log of all financial ops; end-to-end correlation IDs (NFR-8)"]
+    sample_values: []
+    evidence: "docs/prd.md:140 (NFR-8)"
+    confidence: observed
+  - id: DAT-20
+    screen: null
+    label: "account"
+    glossary_term: UNMAPPED
+    kind: both
+    format: other
+    constraints_visible:
+      - "one payer (parent) → 1+ children/students (A1)"
+      - "balance provably consistent with full operation history (Summary, INV-1)"
+    sample_values: []
+    evidence: "docs/prd.md:13-16 (summary), 75 (A1), 157 (INV-1)"
+    confidence: implied      # 'account' is the balance-bearing unit; PRD never fixes account == parent vs subscription vs child
+
+# ---------------------------------------------------------------------------
+# The lifecycle state machine the PRD implies. All `implied` — the PRD names
+# states and effects in prose but draws no explicit machine. Domain-level ids.
+
+transitions:
+  - id: TRN-1
+    from: CHG-DUE
+    to: CHG-PENDING
+    trigger: "billing run (pull) or new-order first charge — FR-1/FR-2/A7"
+    evidence: "docs/prd.md:81 (A7), 93-94 (FR-1/2), 99 (FR-4)"
+    confidence: implied
+  - id: TRN-2
+    from: CHG-PENDING
+    to: CHG-SETTLED
+    trigger: "operator confirmation webhook → PAYMENT ledger entry — FR-6/INV-3/DD-2"
+    evidence: "docs/prd.md:101 (FR-6), 147 (DD-2), 159 (INV-3)"
+    confidence: implied
+  - id: TRN-3
+    from: CHG-PENDING
+    to: CHG-FAILED
+    trigger: "operator decline / failed pull charge — Risk 'failed pull charges spike'"
+    evidence: "docs/prd.md:117 (FR-13), 171 (risk row)"
+    confidence: implied
+  - id: TRN-4
+    from: CHG-FAILED
+    to: DUN-COMMS
+    trigger: "dunning: automated communication — FR-13/A8"
+    evidence: "docs/prd.md:82 (A8), 117 (FR-13)"
+    confidence: implied
+  - id: TRN-5
+    from: DUN-COMMS
+    to: DUN-BLOCKED
+    trigger: "still unpaid after dunning → access block — FR-13"
+    evidence: "docs/prd.md:117 (FR-13)"
+    confidence: implied
+  - id: TRN-6
+    from: DUN-BLOCKED
+    to: CHG-SETTLED
+    trigger: "payment received (push fallback or retry) → recovery/unblock — FR-13"
+    evidence: "docs/prd.md:117 (FR-13), 171 (push fallback)"
+    confidence: implied
+  - id: TRN-7
+    from: CHG-SETTLED
+    to: PAY-REFUNDED
+    trigger: "refund full/partial → reversing ledger entry — FR-10/INV-4"
+    evidence: "docs/prd.md:111 (FR-10), 160 (INV-4)"
+    confidence: implied
+  - id: TRN-8
+    from: PAY-SETTLED
+    to: PAY-CHARGEBACK
+    trigger: "chargeback reverses a settled payment — FR-11"
+    evidence: "docs/prd.md:111 (FR-11)"
+    confidence: implied
+  - id: TRN-9
+    from: SETTLE-INGESTED
+    to: RECON-MATCHED
+    trigger: "three-way match succeeds — FR-15"
+    evidence: "docs/prd.md:125 (FR-15)"
+    confidence: implied
+  - id: TRN-10
+    from: SETTLE-INGESTED
+    to: RECON-MISMATCH
+    trigger: "match fails → back-office queue + alert — FR-15"
+    evidence: "docs/prd.md:125 (FR-15)"
+    confidence: implied
+  - id: TRN-11
+    from: OP-EVENT-RECEIVED
+    to: OP-EVENT-APPLIED
+    trigger: "HMAC verify → enqueue → transactional worker; unique key dedupe — DD-2/INV-2"
+    evidence: "docs/prd.md:147 (DD-2), 158 (INV-2)"
+    confidence: implied
+  - id: TRN-12
+    from: OP-EVENT-RECEIVED
+    to: OP-EVENT-NOOP
+    trigger: "duplicate idempotency key → no-op — DD-2"
+    evidence: "docs/prd.md:147 (DD-2)"
+    confidence: implied
+
+# ---------------------------------------------------------------------------
+# THE POINT OF THE EXERCISE. Reframed for a backend payments PRD: not "what the
+# UI hides" but "what the PRD leaves undecided that an agent will invent."
+# Every one of the 12 checklist categories appears — populated or none-found+reason.
+
+absences:
+  # 1. Empty state
+  - id: ABS-1
+    category: empty-state
+    description: >
+      No first-ledger / zero-history behaviour defined. Undefined: does an account
+      exist with a balance row at 0 before its first charge, or is the balance row
+      created lazily on the first entry? INV-1 (balance == Σ entries) is trivially
+      true at zero, but the read model for "account with no activity" is unspecified.
+      An agent will pick lazy-vs-eager balance creation arbitrarily, which changes
+      the reconciliation and read-path code.
+    affects: [DAT-3, DAT-20]
+    severity: high
+
+  # 2. Error state
+  - id: ABS-2
+    category: error-state
+    description: >
+      Operator failure taxonomy is undefined. FR-6/DD-2 require exactly-once and
+      out-of-order tolerance, but the PRD does not enumerate operator outcomes
+      (declined, pending, expired, requires-SCA, timeout-then-late-success) nor the
+      ledger/charge state each maps to. Also undefined: what a charge that never
+      receives any operator confirmation eventually becomes (INV-3 says it must not
+      be recorded, but not the terminal state or its timeout).
+    affects: [DAT-11, TRN-2, TRN-3]
+    severity: blocking
+
+  # 3. Loading state
+  - id: ABS-3
+    category: loading-state
+    description: none-found
+    reason: >
+      Loading/skeleton/spinner states are UI presentation concerns. The source is a
+      backend PRD and this repo is a service (API + ledger) with no front-end. The
+      backend analogue — in-flight/pending processing — is captured as lifecycle
+      states (CHG-PENDING, OP-EVENT-RECEIVED) under transitions, not here.
+
+  # 4. Permission and role
+  - id: ABS-4
+    category: permission
+    description: >
+      RBAC is asserted (NFR-6: RBAC + MFA + segregation of duties) but no permission
+      matrix exists. Undefined per role (Parent / Admin / Accounting): who may issue
+      refunds, post manual corrections/adjustments, override dunning/unblock access,
+      resolve reconciliation mismatches, and view another payer's account. "Segregation
+      of duties" implies maker/checker on corrections and refunds, but the approval
+      flow and thresholds are unspecified. An agent will implement a single-actor path.
+    affects: [DAT-18, DAT-14, DAT-16, TRN-7]
+    severity: blocking
+
+  # 5. Concurrency
+  - id: ABS-5
+    category: concurrency
+    description: >
+      Idempotency and unique keys are specified (FR-6, DD-2, INV-2), but concurrent
+      writes to the same account balance are not. Undefined: the isolation/locking
+      model when a webhook-driven PAYMENT and a manual ADJUSTMENT (or a refund and a
+      chargeback on the same payment) commit simultaneously while INV-1 must hold. Also
+      undefined: whether the materialized balance uses row-lock / serializable txn /
+      optimistic retry. This directly threatens the balance invariant under the
+      month-start burst.
+    affects: [DAT-3, DAT-1, TRN-7, TRN-8]
+    severity: blocking
+
+  # 6. Boundary and scale
+  - id: ABS-6
+    category: boundary
+    description: >
+      Scale targets exist (A2 single-digit TPS, A3 ≥30% YoY, month-start burst) but
+      per-account boundaries do not. Undefined: cap on ledger-entry history per account
+      before balance materialization needs snapshotting; behaviour of allocation
+      (FR-9, oldest-first) when an account has many open charges; pagination of
+      ledger/history reads. An unbounded Σ-over-history balance recompute is a latent
+      NFR-2 (p95<100ms balance read) violation at scale.
+    affects: [DAT-3, DAT-12]
+    severity: high
+
+  # 7. Lifecycle
+  - id: ABS-7
+    category: lifecycle
+    description: >
+      Account/subscription end-of-life vs data retention is unspecified where two PRD
+      rules collide. FR-3 prorates on cancellation and NFR-7 mandates 5-year financial
+      retention reconciled with GDPR erasure (minor beneficiaries), but the PRD does not
+      say what happens to an account's ledger, credit/wallet balance (DAT-13), or open
+      arrears when a subscription is cancelled or a parent requests erasure. Soft vs hard
+      delete, and what a residual credit/negative balance does on close, are undefined.
+    affects: [DAT-5, DAT-13, DAT-20]
+    severity: blocking
+
+  # 8. Notification and side-effects
+  - id: ABS-8
+    category: notification
+    description: >
+      Dunning is "automated communication → access block" (A8, FR-13) and mismatches
+      "→ alert" (FR-15), but the notification model is undefined: channel(s), cadence
+      and number of dunning attempts before block, quiet-hours, the fatigue ceiling,
+      and whether comms are batched vs per-event. Undefined too: who is notified on a
+      reconciliation mismatch and at what severity. An agent will invent a retry/comms
+      schedule that has direct revenue and churn consequences.
+    affects: [DAT-14, DAT-16, TRN-4, TRN-5]
+    severity: high
+
+  # 9. Time
+  - id: ABS-9
+    category: time
+    description: >
+      Timezone and day-boundary governance is undefined despite being financially
+      load-bearing. A6 fixes a shared "billing day" and FR-15 runs "daily" reconciliation,
+      but neither states the timezone that defines the day boundary (Europe/Warsaw vs UTC
+      vs operator settlement TZ), how DST transitions and month-length (28-31, billing on
+      the 29th-31st) are handled, or the cutoff for assigning an operator event/settlement
+      to a given reconciliation day. Open question 13.3 (billing-day edge cases, refunds
+      crossing months) confirms this is unresolved.
+    affects: [DAT-5, DAT-6, DAT-16, TRN-1, TRN-9]
+    severity: blocking
+
+  # 10. Offline and degraded network
+  - id: ABS-10
+    category: offline
+    description: >
+      Operator-downtime handling is named at the strategy level (Risk row: queue +
+      retry/backoff, change-freeze, dual-operator fallback; DD-2 queue-buffered) but the
+      concrete degraded-mode behaviour is undefined: retry/backoff limits and DLQ policy
+      (NFR-9 mentions DLQ depth but no thresholds), the trigger and criteria for failing
+      over to the second operator (FR-16/DD-5), and whether push payments are accepted
+      while an operator is down. Client-side offline is N/A (backend service).
+    affects: [DAT-11, DAT-17]
+    severity: high
+
+  # 11. Accessibility
+  - id: ABS-11
+    category: accessibility
+    description: none-found
+    reason: >
+      Accessibility (keyboard paths, focus order, screen-reader announcements, colour
+      semantics) is a UI concern. The source is a backend PRD and this repo has no
+      front-end; a11y belongs to the consuming portal, out of this bounded context.
+
+  # 12. Undo and reversibility
+  - id: ABS-12
+    category: undo
+    description: >
+      Reversibility rules are partially stated and partially missing. INV-4 mandates
+      corrections via reversing entries (no in-place edit), and refund/chargeback exist
+      (FR-10/11) — so the ledger is append-only-reversible. But undefined: whether a
+      pull charge can be cancelled between initiation and operator confirmation; the
+      window/authority to reverse a manual ADJUSTMENT; confirmation vs approval pattern
+      for destructive back-office actions; and the blast radius of a bulk correction
+      during a reconciliation-drift incident.
+    affects: [DAT-1, TRN-7, TRN-8]
+    severity: high
+
+  # Role-variation (checklist category folded into permission, ABS-4) — recorded for completeness
+  - id: ABS-13
+    category: role-variation
+    description: >
+      Student is defined as a minor, GDPR-sensitive, non-payer beneficiary (persona,
+      NFR-7), yet no rule states what student-linked data may appear on a payer's
+      invoice, history, or audit log without violating data-minimisation for minors.
+      The parent↔student↔account cardinality (A1: ~1.4-1.5 children/parent) is stated
+      but its effect on balance ownership and invoice line-items is not.
+    affects: [DAT-18, DAT-20, DAT-15]
+    severity: high
+
+# Genuine unknowns — could not be framed even as a scoped absence.
+questions:
+  - id: Q-1
+    question: >
+      What is the balance-bearing unit — one account per parent, per subscription, or
+      per child? INV-1/FR-8 assume "account" but the PRD never fixes its grain.
+    context: >
+      Determines the schema's primary aggregate, how allocation (FR-9) and credit
+      (DAT-13) scope, and whether one parent with multiple children has one balance or
+      many. Every downstream table keys off this.
+    blocks: [ABS-1, ABS-7, ABS-13]
+  - id: Q-2
+    question: >
+      What are the operator's actual webhook guarantees (at-least-once? signed? their
+      own idempotency keys?), settlement file format, and refund/chargeback/mandate APIs?
+    context: >
+      PRD Open Question 13.1 flags this as an external dependency. DD-2's HMAC-verify →
+      enqueue → dedupe design and the entire reconciliation match (FR-15) cannot be built
+      concretely until the operator contract is known.
+    blocks: [ABS-2, ABS-10]
+  - id: Q-3
+    question: >
+      What are the SALDEO and KSeF integration specifics (invoice format, handoff
+      protocol, timing, error handling)?
+    context: >
+      PRD Open Question 13.2. FR-14/DD-7 depend on it; without it the invoice entity
+      (DAT-15) and accounting handoff cannot be specified beyond "on demand".
+    blocks: []
+  - id: Q-4
+    question: >
+      What is the maker/checker (segregation-of-duties) workflow for refunds, manual
+      corrections, and dunning/access overrides — approval steps, thresholds, and roles?
+    context: >
+      NFR-6 requires segregation of duties but defines no workflow. This is a permission +
+      audit design decision (NFR-8) that shapes the API surface for back-office operations.
+    blocks: [ABS-4, ABS-12]
+  - id: Q-5
+    question: >
+      What is the canonical timezone / day-boundary for billing day and daily
+      reconciliation, and how are month-length and DST edge cases (billing on 29-31,
+      refunds crossing months) resolved?
+    context: >
+      PRD Open Question 13.3. Governs charge scheduling (TRN-1), reconciliation windows
+      (TRN-9), and correctness of the "daily" match (FR-15).
+    blocks: [ABS-9]
+  - id: Q-6
+    question: >
+      What are the concrete dunning parameters — number and spacing of retry/comms
+      attempts, the delay before access block, and what "recovery" restores?
+    context: >
+      A8/FR-13 name the flow but not the schedule. Directly affects collection rate and
+      arrears metrics (Section 4) and the churn/revenue trade-off.
+    blocks: [ABS-8]
