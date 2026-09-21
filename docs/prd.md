@@ -2,7 +2,7 @@
 
 **Status:** Draft for review  ·  **Author:** Krzysztof Jackowski (EM candidate)  ·  **Date:** 2026-09-20
 
-**Related:** [ADR 0001 — backend stack](adr/0001-backend-stack.md) · [ADR 0002 — deployment & infrastructure](adr/0002-deployment-and-infrastructure.md) · [ADR 0003 — async backbone](adr/0003-async-backbone.md) · [ADR 0004 — API auth](adr/0004-api-auth.md) · [Implementation plan](implementation-plan.md)
+**Related:** [ADR 0001 — backend stack](adr/0001-backend-stack.md) · [ADR 0002 — deployment & infrastructure](adr/0002-deployment-and-infrastructure.md) · [ADR 0003 — async backbone](adr/0003-async-backbone.md) · [ADR 0004 — API auth](adr/0004-api-auth.md) · [ADR 0005 — DB migrations](adr/0005-database-migrations.md) · [ADR 0006 — secrets](adr/0006-secrets-management.md) · [ADR 0007 — region & residency](adr/0007-region-and-data-residency.md) · [Implementation plan](implementation-plan.md)
 
 ## 1. Summary
 
