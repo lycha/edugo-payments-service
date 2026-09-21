@@ -58,18 +58,20 @@ data:
     constraints_visible:
       - "append-only; corrections are new reversing entries only (INV-4, FR-7)"
       - "entry types named across PRD: charge, payment, refund, partial refund, discount, late-payment interest, adjustment/correction, credit/overpayment, fee, chargeback"
+      - "SIGN CONVENTION (matches migration): balance = Σ entries; positive balance = customer in credit, negative = arrears. Credits(+): PAYMENT, CREDIT, DISCOUNT. Debits(-): CHARGE, LATE_FEE, REFUND, PARTIAL_REFUND, CHARGEBACK. ADJUSTMENT signed per case. FEE = operator fee, house/settlement ledger only, NOT the customer balance. See glossary#sign-convention."
     sample_values: ["CHARGE", "PAYMENT", "REFUND", "PARTIAL_REFUND", "DISCOUNT", "LATE_FEE", "ADJUSTMENT", "CREDIT", "FEE", "CHARGEBACK"]
     evidence: "docs/prd.md:104-107 (FR-7/FR-8), 110-113 (FR-10/11/12), 160 (INV-4)"
     confidence: observed
   - id: DAT-2
     screen: null
-    label: "amount (minor units / grosze or cents)"
+    label: "amount (integer minor units of the row's currency)"
     glossary_term: "Money / minor units"
     kind: both
     format: currency
     constraints_visible:
       - "integer minor units, never floats (NFR-10)"
       - "signed on ledger entries (reversing entries imply negatives)"
+      - "data layer currency-generic (ISO-4217 code + minor units per row); PLN-only is operational scope (A4), enforced by validation not schema (PR-003)"
     sample_values: []
     evidence: "docs/prd.md:142 (NFR-10)"
     confidence: observed
@@ -91,7 +93,7 @@ data:
     glossary_term: "Money / minor units"
     kind: both
     format: enum
-    constraints_visible: ["PLN only this iteration (A4); multi-currency is a non-goal"]
+    constraints_visible: ["data layer currency-generic (ISO-4217 code per money-bearing row); PLN-only is operational scope this iteration (A4), enforced by an allowed-currency check, not the schema (PR-003)"]
     sample_values: ["PLN"]
     evidence: "docs/prd.md:42 (non-goal), 78 (A4)"
     confidence: observed
@@ -119,6 +121,8 @@ data:
       - "mid-month enrollment → prorated first charge (FR-2)"
       - "new order triggers first charge; billing run generates subsequent (A7)"
       - "never double-paid; over-allocation becomes credit (INV-5)"
+      - "ledger sign: a CHARGE is a DEBIT (negative) entry; its magnitude is the amount owed. See DAT-1 sign convention / glossary#sign-convention."
+      - "carries tax breakdown net/tax/gross + rate + treatment + jurisdiction; gross posts to the ledger (PR-009, DAT-23)"
     sample_values: []
     evidence: "docs/prd.md:81 (A7), 93-95 (FR-1/2/3), 161 (INV-5)"
     confidence: observed
@@ -165,6 +169,7 @@ data:
     constraints_visible:
       - "unique; duplicate → no-op (DD-2)"
       - "covers both user actions and operator notifications, exactly-once effect (FR-6, INV-2)"
+      - "REQUIRED on every money-moving mutation — payment, refund, partial refund, adjustment, chargeback (PR-005); refund/adjustment tables (candidate) need their own idempotency key + unique index"
     sample_values: []
     evidence: "docs/prd.md:101 (FR-6), 147 (DD-2), 158 (INV-2)"
     confidence: observed
@@ -221,6 +226,7 @@ data:
     constraints_visible:
       - "on demand (A9, FR-14)"
       - "handed off to accounting SALDEO → KSeF (A10, FR-14, DD-7)"
+      - "shows net/tax/gross + tax treatment per line (PR-009, DAT-23); in-scope tax document. Billing note is a separate, out-of-scope document."
     sample_values: []
     evidence: "docs/prd.md:83-84 (A9/A10), 121 (FR-14), 152 (DD-7)"
     confidence: observed
@@ -304,6 +310,33 @@ data:
       - "attribution metadata on charges/invoices; added by workshop OFF-1"
     sample_values: []
     evidence: "specs/payments/decisions.yaml#Q-1 (OFF-1)"
+    confidence: observed
+  - id: DAT-23
+    screen: null
+    label: "tax breakdown (net / tax / gross)"
+    glossary_term: "Tax (VAT)"
+    kind: both
+    format: currency
+    constraints_visible:
+      - "per charge/invoice line: net_minor, tax_minor, gross_minor, tax_rate, tax_treatment, tax_jurisdiction"
+      - "INV-7: gross = net + tax; ledger/balance in gross, net/tax are attributes (PR-009)"
+      - "rounding per-line, half-up to minor unit, then sum (CONSTRAINTS FIN-1)"
+      - "added by review PR-009 (not in PRD/harvest)"
+    sample_values: []
+    evidence: "specs/payments/decisions.yaml#PR-009; specs/payments/glossary.md#tax"
+    confidence: observed
+  - id: DAT-24
+    screen: null
+    label: "tax rate table"
+    glossary_term: "Tax rate table"
+    kind: both
+    format: other
+    constraints_visible:
+      - "effective-dated, keyed by (jurisdiction, product/category, date)"
+      - "PL tuition defaults to EXEMPT (0%); multi-jurisdiction-ready, international deferred"
+      - "added by review PR-009 (not in PRD/harvest)"
+    sample_values: []
+    evidence: "specs/payments/decisions.yaml#PR-009"
     confidence: observed
 # ---------------------------------------------------------------------------
 # The lifecycle state machine the PRD implies. All `implied` — the PRD names

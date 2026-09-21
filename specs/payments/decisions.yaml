@@ -12,11 +12,11 @@ meta:
   captured_at: 2026-09-21
   source_artefact:
     repo: edugo-payments-service
-    commit: ff53db3866122679491547de775cca44b2e580d5   # HEAD at capture; workshop-output.md is uncommitted in the working tree
+    commit: 706aa32                                    # commit that contains workshop-output.md (captured pre-commit at HEAD ff53db3; committed here)
     path: specs/payments/workshop-output.md
   inventory:
     repo: edugo-payments-service
-    commit: 74d22fea62a7c95008501e9ccbe1468021b05f7c    # harvest commit recorded in feature-inventory.yaml meta
+    commit: 706aa32                                    # content reviewed/reconciled here; 74d22fea62a7c95008501e9ccbe1468021b05f7c is the harvest-origin commit
     path: specs/payments/feature-inventory.yaml
   participants:
     - role: CTO (decision-maker)
@@ -308,3 +308,58 @@ still_open:
     note: "Owner DPO/Legal; due date not set."
   - ref: Q-3
     note: "Deferred with no owner — fine while mock-only; needs an owner before real accounting integration."
+
+# ---------------------------------------------------------------------------
+# REVIEW DISPOSITIONS — CTO decisions on peer-review findings (2026-09-21)
+# Ref: specs/payments/peer-review-architecture.md
+# ---------------------------------------------------------------------------
+review_dispositions:
+  - ref: PR-001
+    disposition: FIXED
+    decision: "Documented ledger sign convention (positive=credit, negative=arrears); FEE = house/settlement ledger only."
+  - ref: PR-003
+    disposition: FIXED
+    decision: "Data layer is currency-generic (ISO-4217 code + minor units per row); operational scope stays PLN-only (A4), enforced by validation not schema. DAT-2/DAT-4 labels corrected."
+  - ref: PR-004
+    disposition: FIXED
+    decision: "Added a manual disbursement / bank-transfer payout path (audited, maker/checker) for residual credit with no refundable original capture."
+  - ref: PR-005
+    disposition: FIXED
+    decision: "Idempotency key required on every money-moving mutation (payment, refund, partial refund, adjustment, chargeback); refund/adjustment tables need their own idempotency key + unique index."
+  - ref: PR-006
+    disposition: FIXED
+    decision: "Added INV-6 — cumulative refunds against a payment never exceed its captured amount (no over-refund)."
+  - ref: PR-007
+    disposition: DEFERRED
+    decision: "Chargeback re-opening the receivable + chargeback fee deferred as an edge case; not modelled this iteration."
+  - ref: PR-008
+    disposition: FIXED
+    decision: "Allocation locks target charges with SELECT ... FOR UPDATE within the allocation transaction (protects INV-5 across charges; the single-row balance increment alone does not)."
+  - ref: PR-009
+    disposition: FIXED
+    decision: >
+      Tax modelled INSIDE payments. Each charge/invoice line carries net/tax/gross (minor units) +
+      tax_rate + tax_treatment (STANDARD/REDUCED/ZERO_RATED/EXEMPT + legal reason) + jurisdiction.
+      INV-7: gross = net + tax. Ledger/balance stay in GROSS (net/tax are charge attributes, no split
+      entries). Rounding: per-line, half-up to the minor unit, then sum lines (CONSTRAINTS FIN-1).
+      Effective-dated tax-rate table keyed by (jurisdiction, category, date); PL tuition defaults to
+      EXEMPT (0%), multi-jurisdiction-ready, international deferred. The INVOICE (in scope) shows
+      net/tax/gross/treatment; the BILLING NOTE is a separate document, out of scope this exercise.
+      SALDEO/KSeF remains the legal fiscal system of record (DD-7); payments hands over the breakdown.
+    sub_decisions:
+      - "ledger in gross, net/tax as charge attributes (not split entries) — explicit"
+      - "tax rounding per-line, half-up to the minor unit, then sum — explicit"
+      - "billing note and invoice are two documents; invoice is in scope, billing note deferred — explicit"
+      - "model now, PL tuition EXEMPT default, multi-jurisdiction-ready, international deferred — explicit"
+  - ref: PR-010
+    disposition: DEFERRED
+    decision: "Minor-access-block legal risk deferred — not part of this exercise."
+  - ref: PR-012
+    disposition: FIXED
+    decision: "Added Arrears + Write-off glossary entries; clarified EXPIRED (no response, reconciliation) vs FAILED/DECLINED (enters dunning)."
+  - ref: PR-013
+    disposition: FIXED
+    decision: "decisions.yaml source_artefact commit corrected to 706aa32."
+  - ref: PR-014
+    disposition: FIXED
+    decision: "CONSTRAINTS INFRA-2 now requires an operator_events table with UNIQUE (operator, operator_event_id)."
