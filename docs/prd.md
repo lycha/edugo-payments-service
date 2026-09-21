@@ -2,7 +2,7 @@
 
 **Status:** Draft for review  ·  **Author:** Krzysztof Jackowski (EM candidate)  ·  **Date:** 2026-09-20
 
-**Related:** [ADR 0001 — backend stack](adr/0001-backend-stack.md) · [Implementation plan](implementation-plan.md)
+**Related:** [ADR 0001 — backend stack](adr/0001-backend-stack.md) · [ADR 0002 — deployment & infrastructure](adr/0002-deployment-and-infrastructure.md) · [ADR 0003 — async backbone](adr/0003-async-backbone.md) · [ADR 0004 — API auth](adr/0004-api-auth.md) · [ADR 0005 — DB migrations](adr/0005-database-migrations.md) · [ADR 0006 — secrets](adr/0006-secrets-management.md) · [ADR 0007 — region & residency](adr/0007-region-and-data-residency.md) · [Implementation plan](implementation-plan.md)
 
 ## 1. Summary
 
@@ -83,7 +83,7 @@ one concrete operator + Stripe as second). **Out of scope:** see Non-Goals.
 | A9  | **Invoices on demand.**                                                                                                                                               |
 | A10 | Accounting via **SALDEO**; **KSeF via accounting**, not direct.                                                                                                       |
 | A11 | Card data **tokenized at operator** → **PCI SAQ-A**; store tokens/mandates only.                                                                                      |
-| A12 | Stack: **TypeScript + GCP** (Cloud Run, Cloud SQL Postgres, Pub/Sub); team of 3.                                                                                      |
+| A12 | Stack: **TypeScript + GCP** (GKE/Kubernetes, Cloud SQL Postgres, Pub/Sub); team of 3.                                                                                      |
 
 
 ## 8. Functional Requirements
@@ -131,11 +131,11 @@ one concrete operator + Stripe as second). **Out of scope:** see Non-Goals.
 ## 9. Non-Functional Requirements
 
 - NFR-1 **Availability 99.9%/month**; no planned maintenance during first \~5 business days.
-- NFR-2 **Latency:** initiate p95&lt;400ms/p99&lt;800ms; webhook→balance p95&lt;2s/p99&lt;5s; balance read p95&lt;100ms.
-- NFR-3 **Consistency:** strong within an account at ledger-transaction level; eventual (seconds) from operator confirmation to balance, with exactly-once.
+- NFR-2 **Latency:** initiate p95&lt;400ms/p99&lt;800ms; operator-confirmation→balance eventually consistent **p95&lt;2 min** (inbox-relay cadence; see ADR-0003 — relaxed from the original 2s); balance read p95&lt;100ms.
+- NFR-3 **Consistency:** strong within an account at ledger-transaction level; eventual (**~1–2 min**, inbox-relay cadence; see ADR-0003) from operator confirmation to balance, with exactly-once.
 - NFR-4 **Durability/DR:** RPO≈0 for committed financial data (Cloud SQL HA + PITR); RTO&lt;1h.
-- NFR-5 **Scalability:** ≥30% YoY headroom; autoscale for the predictable burst (serverless).
-- NFR-6 **Security:** PCI SAQ-A (tokenization at operator); SCA/PSD2 (CIT first, MIT recurring); secrets/tokens in GCP KMS; RBAC + MFA + segregation of duties; rate limiting / anti card-testing.
+- NFR-5 **Scalability:** ≥30% YoY headroom; autoscale for the predictable burst (GKE Horizontal Pod Autoscaler; see ADR-0002).
+- NFR-6 **Security:** PCI SAQ-A (tokenization at operator); SCA/PSD2 (CIT first, MIT recurring); secrets/tokens in GCP KMS; RBAC + MFA + segregation of duties; rate limiting / anti card-testing. **Auth mechanism:** S2S GCP service-account tokens + forwarded user JWT (attested actor) — see ADR-0004.
 - NFR-7 **Compliance/Privacy:** GDPR/RODO (minor beneficiaries; data minimization; EU data residency); financial-document retention (5y) reconciled with erasure; DPA with operator.
 - NFR-8 **Auditability:** immutable audit log of all financial ops; end-to-end correlation IDs.
 - NFR-9 **Observability:** SLOs + golden signals (success rate, latency, reconciliation drift, DLQ depth), alerting, distributed tracing.
@@ -150,7 +150,7 @@ one concrete operator + Stripe as second). **Out of scope:** see Non-Goals.
 - DD-5 Operator abstraction + cost-based routing (PayU/Tpay + Stripe).
 - DD-6 PCI SAQ-A via operator tokenization; SCA CIT/MIT model.
 - DD-7 KSeF via accounting (SALDEO); invoices on demand.
-- DD-8 GCP-native, serverless-first (Cloud Run + Pub/Sub + Cloud SQL).
+- DD-8 GCP-native (GKE + Pub/Sub + Cloud SQL); deployed as a private, containerised, multi-pod service — deployment topology per ADR-0002. *(Revised from the original serverless/Cloud Run intent.)*
 
 ## 11. Correctness Invariants (must always hold)
 

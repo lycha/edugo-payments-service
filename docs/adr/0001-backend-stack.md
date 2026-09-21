@@ -61,7 +61,7 @@ imported via the `#generated/*` subpath. Awilix composes at the edge; the ledger
 
 ## Open decisions (deferred, revisit before M2)
 
-1. **Async / scheduling backbone: GCP Pub/Sub vs pg-boss.**
+1. **Async / scheduling backbone: GCP Pub/Sub vs pg-boss.** — **RESOLVED by [ADR-0003](0003-async-backbone.md): neither** — a Postgres transactional inbox + K8s CronJob relays.
    - *Pub/Sub* — matches the PRD and GCP-native scaling; needs a transactional
      outbox and more infra.
    - *pg-boss* — Postgres-native queue with cron + outbox semantics; zero extra
