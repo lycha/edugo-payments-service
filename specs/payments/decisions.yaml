@@ -1,0 +1,310 @@
+# decisions.yaml — captured from a real gap-interrogation workshop
+#
+# DEVIATION NOTE: the skill's default is a separate artefact tree
+# (AEOS_ARTEFACT_TREE / *-specs). None is configured here and all prior payments
+# artefacts already live in specs/payments/ in the code repo, so this is written
+# alongside them by established project convention. No decisions.schema.json is
+# present; validated by YAML parse + structural self-check.
+
+meta:
+  feature: payments
+  mode: workshop-captured
+  captured_at: 2026-09-21
+  source_artefact:
+    repo: edugo-payments-service
+    commit: ff53db3866122679491547de775cca44b2e580d5   # HEAD at capture; workshop-output.md is uncommitted in the working tree
+    path: specs/payments/workshop-output.md
+  inventory:
+    repo: edugo-payments-service
+    commit: 74d22fea62a7c95008501e9ccbe1468021b05f7c    # harvest commit recorded in feature-inventory.yaml meta
+    path: specs/payments/feature-inventory.yaml
+  participants:
+    - role: CTO (decision-maker)
+    - role: Product Manager, Payments (facilitator/scribe)
+
+# ---------------------------------------------------------------------------
+# QUESTIONS — outcome ∈ {ANSWERED, RECLASSIFIED, ESCALATED, DROPPED}
+# ---------------------------------------------------------------------------
+questions:
+  - id: Q-1
+    outcome: ANSWERED
+    capture_confidence: explicit
+    statement: >
+      The balance-bearing unit is one account per parent. The parent is the primary
+      user; the model is bank-style — a parent profile with N child sub-accounts (one
+      per child), and each classroom onboarding is an enrollment linked to a
+      (sub-)account. The parent balance is the single authoritative balance.
+    evidence: >
+      "Yes one account per parent. In fact parent should be our primary user ... they
+      can onboard kids as their subordinate accounts ... like bank accounts work ...
+      each onboarding is linked to the account." Plus (NEW-Q-B) "keep one authoritative
+      balance per parent".
+    spawned: [OFF-1, OFF-2]
+    debt_created:
+      - what: "Define parent→child-sub-account→enrollment aggregate in schema; parent balance is the single materialized balance, per-student/per-class are computed views."
+        owner: "Eng + PM"
+
+  - id: Q-2
+    outcome: ESCALATED
+    capture_confidence: explicit
+    statement: >
+      Design for the worst case — verify HMAC and own dedup + idempotency; never rely
+      on an operator-supplied idempotency key (derive from (operator, operator_event_id)).
+      Build an operator abstraction/port; first operator PayU. For THIS exercise the
+      operator is mocked to validate the concept. Actual PayU contract must be confirmed.
+    evidence: >
+      "We model for the worst case scenario where we need to verify the HMAC and own the
+      dedup + idempotency. We create an abstraction to easily connect new provider ... In
+      this exercise we just need to mock the provider response ... 2. PayU".
+    links_assumption: ASM-1
+    owner: "TBD — CTO left unassigned; to be named before any live PayU integration"
+    due: "before live PayU integration (no date set)"
+
+  - id: Q-3
+    outcome: DEFERRED
+    capture_confidence: explicit
+    statement: >
+      SALDEO/KSeF integration is out of scope for this exercise; model an
+      "invoice → accounting handoff" port and mock SALDEO's response. Invoices on
+      demand; KSeF via accounting, never direct.
+    evidence: >
+      "agree" to: defer real SALDEO/KSeF, mock the handoff, escalate specifics to
+      Accounting; followed by "no owner".
+    owner: "none assigned (explicit CTO decision)"
+
+  - id: Q-4
+    outcome: ANSWERED
+    capture_confidence: explicit
+    statement: >
+      Maker/checker (two distinct users; no self-approval) is required for all manual
+      adjustments/corrections, all refunds, and dunning overrides. Each approved action
+      writes both identities + correlation id to the immutable audit log. The refund
+      auto-approve amount threshold is escalated to Finance (mechanism now, number later).
+    evidence: >
+      "Agree on all three, escalate the refund threshold to finance".
+    spawned_escalation: E-REFUND-THRESHOLD
+    debt_created:
+      - what: "Implement maker/checker approval state on refunds/adjustments/dunning-overrides + audit of both identities."
+        owner: "Eng"
+
+  - id: Q-5
+    outcome: ANSWERED
+    capture_confidence: explicit
+    statement: >
+      Business timezone = Europe/Warsaw (billing day, dunning); timestamps stored UTC
+      (timestamptz). Reconciliation day-boundary = PayU's settlement window, deliberately
+      distinct from business TZ. Billing day of 29/30/31 clamps to month-end. Refunds
+      crossing months are new reversing entries dated at event time (never back-dated).
+    evidence: >
+      "Agree on all four".
+    debt_created:
+      - what: "Two distinct date-boundary calculators (business=Warsaw, reconciliation=operator settlement) + month-end clamp in billing scheduler."
+        owner: "Eng"
+
+  - id: Q-6
+    outcome: ANSWERED
+    capture_confidence: explicit
+    statement: >
+      Dunning: retry+comms at Day 0/+3/+7/+10, access block at +14 (Europe/Warsaw
+      business days). Channels email + in-app for M1. One message per step (not per
+      retry), daytime Warsaw, digest multiple failed charges, fatigue ceiling ~5/cycle.
+      Recovery on any successful payment = immediate unblock + dunning cleared.
+      Reconciliation mismatch → back-office queue + ops alert (not the parent), ≤24h.
+    evidence: >
+      "Agreed" to the full dunning schedule/channels/recovery/mismatch proposal, incl.
+      treating the day-intervals as ASSUMED to tune on real data.
+    links_assumption: ASM-3
+
+# ---------------------------------------------------------------------------
+# ABSENCES — outcome ∈ {DECIDED, DEFERRED, ASSUMED, ESCALATED}
+# ---------------------------------------------------------------------------
+absences:
+  - id: ABS-1
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: "Eager creation — account + zero balance row written at parent onboarding, before any charge; balance reads never hit null and INV-1 holds from t=0."
+    evidence: '"ABS-1 - eager creation".'
+
+  - id: ABS-2
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: >
+      Define our own canonical charge/payment state machine, mapping operator outcomes
+      onto it: PENDING → REQUIRES_ACTION(SCA) → AUTHORIZED → SETTLED, plus DECLINED,
+      EXPIRED, FAILED. A charge with no operator confirmation goes PENDING → EXPIRED after
+      72h and is never recorded as paid (INV-3).
+    evidence: >
+      "failure taxonomy - agree let's have our own state machine that reflects our
+      business case." 72h timeout: initially inferred, then "confirmed 2 lose ends" →
+      ratified explicit.
+    links_assumption: ASM-2
+
+  - id: ABS-3
+    outcome: DEFERRED
+    capture_confidence: explicit
+    statement: "Loading/spinner states are UI concerns; N/A to this backend service. Closed at harvest, not re-opened in session."
+    evidence: "none-found at harvest; not discussed in workshop."
+
+  - id: ABS-4
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: >
+      RBAC matrix: Parent (own account only), Admin/back-office (operations, all under
+      maker/checker), Accounting (read + invoice→SALDEO handoff, no balance mutation),
+      Student (no payments access).
+    evidence: '"Agree on all three" (Cluster E).'
+
+  - id: ABS-5
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: >
+      Ledger append + balance update in one DB transaction; balance update is an atomic
+      UPDATE balance = balance + delta on the parent balance row. Concurrent writes to the
+      same account serialize on that row lock; READ COMMITTED is sufficient. Double-submit
+      caught by the unique idempotency key.
+    evidence: '"Agree" (Cluster C).'
+
+  - id: ABS-6
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: >
+      Materialized balance ⇒ O(1) balance reads (no Σ-over-history recompute). Paginate
+      ledger/history reads. No snapshotting for M1.
+    evidence: '"Agree" (Cluster C).'
+    revisit_when: "a single account's ledger-entry count grows pathological, or balance-read p95 breaches SLO"
+
+  - id: ABS-7
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: >
+      Cancellation stops billing + prorates current charge; account/ledger persist (≠
+      deletion). Residual credit is refunded to the parent; residual arrears survive
+      cancellation (write-off only via audited adjustment). GDPR erasure retains financial
+      records 5y + redacts parent billing PII + soft-delete only; blocked while an open
+      debt/dispute needs the billing contact.
+    evidence: '"agree" (Cluster G).'
+    spawned_escalation: E-RETENTION-POLICY
+
+  - id: ABS-8
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: >
+      Notification model as in Q-6: email + in-app, one message per dunning step, daytime
+      Warsaw, digest multiple failures, ceiling ~5/cycle; reconciliation mismatch → back-office
+      queue + ops alert (not parent), detected ≤24h.
+    evidence: '"Agreed" (Cluster F).'
+    links_assumption: ASM-3
+
+  - id: ABS-9
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: "Resolved together with Q-5 — Europe/Warsaw for business boundaries, PayU settlement window for reconciliation, month-end clamp, no back-dated refunds."
+    evidence: '"Agree on all four" (Cluster D).'
+
+  - id: ABS-10
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: >
+      Bounded exponential backoff, max 5 retries → DLQ → back-office queue; manual operator
+      failover for M1 (automatic cost-based routing is later); push payments accepted while
+      pull is degraded.
+    evidence: '"agreed" (Cluster B, item 4).'
+
+  - id: ABS-11
+    outcome: DEFERRED
+    capture_confidence: explicit
+    statement: "Accessibility is a UI concern; N/A to this backend service. Closed at harvest, not re-opened."
+    evidence: "none-found at harvest; not discussed in workshop."
+
+  - id: ABS-12
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: >
+      Charge cancellable while PENDING/REQUIRES_ACTION; once SETTLED, reversal only via
+      refund/chargeback (reversing entry, INV-4). No in-place undo/edit on posted entries —
+      corrections are new reversing entries, themselves maker/checker'd. Bulk corrections
+      require senior approval + mandatory dry-run, logged per entry.
+    evidence: '"Agree on all three" (Cluster E).'
+
+  - id: ABS-13
+    outcome: DECIDED
+    capture_confidence: explicit
+    statement: >
+      In payments, the only PII stored is the parent's billing information. Students are
+      modelled by ID only (referencing the parent account); their own account system is out
+      of scope. On invoices, student name + classroom/course enrollment are rendered at
+      invoice-generation time from the out-of-scope student system, never stored in payments.
+    evidence: >
+      "the only PII data stored should be the billing information from the parent. Students
+      should be modeled only by ID ... On the invoice we should have the name and
+      classroom/course enrollment" + confirmed "student name is rendered at invoice-generation time".
+
+# ---------------------------------------------------------------------------
+# ASSUMPTIONS — mirrored into assumption-register.yaml
+# ---------------------------------------------------------------------------
+assumptions:
+  - id: ASM-1
+    statement: "Operator webhooks are at-least-once and HMAC-signed, with no operator-supplied idempotency key (we own dedup)."
+    capture_confidence: explicit
+    revisit_when: "real PayU contract obtained / before first live integration"
+    source: Q-2
+  - id: ASM-2
+    statement: "A charge with no operator confirmation expires after 72h (PENDING → EXPIRED)."
+    capture_confidence: explicit   # value ratified in session; still a tunable policy number
+    revisit_when: "ops confirms/observes real operator confirmation latencies"
+    source: ABS-2
+  - id: ASM-3
+    statement: "Dunning intervals 0/+3/+7/+10 → block +14 and fatigue ceiling ~5/cycle."
+    capture_confidence: explicit   # schedule decided; intervals flagged tunable
+    revisit_when: "after M1 real collection data (arrears / collection-rate metrics)"
+    source: [Q-6, ABS-8]
+
+# ---------------------------------------------------------------------------
+# ESCALATIONS — need owner + due (some intentionally open)
+# ---------------------------------------------------------------------------
+escalations:
+  - id: E-OPERATOR-CONTRACT
+    from: Q-2
+    what: "Confirm PayU webhook guarantees, settlement format, refund/chargeback/mandate APIs."
+    owner: "TBD (CTO left unassigned)"
+    due: "before live PayU integration (no date set)"
+  - id: E-REFUND-THRESHOLD
+    from: Q-4
+    what: "Set the refund auto-approve amount threshold (PLN)."
+    owner: "Finance"
+    due: "not set in session"
+  - id: E-RETENTION-POLICY
+    from: ABS-7
+    what: "Exact retention-vs-erasure policy details for minors' data."
+    owner: "DPO/Legal"
+    due: "not set in session"
+
+# ---------------------------------------------------------------------------
+# OFF-INVENTORY FINDINGS — feedback to prototype-harvest
+# ---------------------------------------------------------------------------
+off_inventory:
+  - id: OFF-1
+    finding: "Parent → child sub-account → class enrollment hierarchy. Harvest modelled a flat 'account' (DAT-20); real model is a two-level aggregate. New entities: child sub-account, enrollment."
+    action: "Added to feature-inventory.yaml (DAT-21, DAT-22); DAT-20 updated to the decided model."
+  - id: OFF-2
+    finding: "Teacher payments — not in the PRD at all. Surfaced as the original justification for per-student/per-class balances."
+    action: "Ruled OUT of scope this exercise; charge-level attribution retained for a future payout feature."
+  - id: NEW-DEBT-1
+    finding: "The recurring billing run must be single-runner-safe across clustered k8s pods (leader election / advisory lock / dedupe on (subscription, billing_period)) to avoid double-charging."
+    action: "→ CONSTRAINTS.md + tracker task."
+  - id: CONSTRAINT-INFRA
+    finding: "Predicted load ⇒ no DB read-replicas and no balance snapshotting for M1. Service runs as stateless clustered pods; any pod handles any webhook; cross-pod at-most-once relies on DB-level dedup only (no in-memory dedup / pod affinity)."
+    action: "→ CONSTRAINTS.md."
+
+# ---------------------------------------------------------------------------
+# STILL OPEN — inventory items with no clean closure; and items needing a human
+# ---------------------------------------------------------------------------
+still_open:
+  - ref: E-OPERATOR-CONTRACT
+    note: "Owner unassigned by explicit CTO choice; must be named before live integration."
+  - ref: E-REFUND-THRESHOLD
+    note: "Owner Finance; due date not set."
+  - ref: E-RETENTION-POLICY
+    note: "Owner DPO/Legal; due date not set."
+  - ref: Q-3
+    note: "Deferred with no owner — fine while mock-only; needs an owner before real accounting integration."

@@ -24,7 +24,7 @@ meta:
     repo: edugo-payments-service
     commit: 74d22fea62a7c95008501e9ccbe1468021b05f7c
     files: [docs/prd.md]
-  glossary: null                       # no glossary.md found in the payments context — flagged
+  glossary: specs/payments/glossary.md                       # mapped to glossary terms (workshop 2026-09-21)
   harvested_at: 2026-09-20T17:33:49Z
 
 # ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ data:
   - id: DAT-1
     screen: null
     label: "ledger entry"
-    glossary_term: UNMAPPED
+    glossary_term: "Ledger entry"
     kind: both
     format: enum
     constraints_visible:
@@ -64,7 +64,7 @@ data:
   - id: DAT-2
     screen: null
     label: "amount (minor units / grosze or cents)"
-    glossary_term: UNMAPPED
+    glossary_term: "Money / minor units"
     kind: both
     format: currency
     constraints_visible:
@@ -76,7 +76,7 @@ data:
   - id: DAT-3
     screen: null
     label: "materialized balance"
-    glossary_term: UNMAPPED
+    glossary_term: "Balance (materialized parent balance)"
     kind: display
     format: currency
     constraints_visible:
@@ -88,7 +88,7 @@ data:
   - id: DAT-4
     screen: null
     label: "currency"
-    glossary_term: UNMAPPED
+    glossary_term: "Money / minor units"
     kind: both
     format: enum
     constraints_visible: ["PLN only this iteration (A4); multi-currency is a non-goal"]
@@ -98,7 +98,7 @@ data:
   - id: DAT-5
     screen: null
     label: "subscription"
-    glossary_term: UNMAPPED
+    glossary_term: "Subscription"
     kind: both
     format: other
     constraints_visible:
@@ -111,7 +111,7 @@ data:
   - id: DAT-6
     screen: null
     label: "charge"
-    glossary_term: UNMAPPED
+    glossary_term: "Charge"
     kind: both
     format: other
     constraints_visible:
@@ -125,7 +125,7 @@ data:
   - id: DAT-7
     screen: null
     label: "stored payment method / token / mandate (card-on-file)"
-    glossary_term: UNMAPPED
+    glossary_term: "Payment method / token / mandate"
     kind: both
     format: other
     constraints_visible:
@@ -137,7 +137,7 @@ data:
   - id: DAT-8
     screen: null
     label: "SCA/PSD2 authentication flag (CIT vs MIT)"
-    glossary_term: UNMAPPED
+    glossary_term: "CIT / MIT / SCA"
     kind: input
     format: enum
     constraints_visible: ["first payment CIT/SCA; subsequent recurring MIT (FR-4, NFR-6)"]
@@ -147,7 +147,7 @@ data:
   - id: DAT-9
     screen: null
     label: "payment (push vs pull)"
-    glossary_term: UNMAPPED
+    glossary_term: "Payment"
     kind: both
     format: enum
     constraints_visible:
@@ -159,7 +159,7 @@ data:
   - id: DAT-10
     screen: null
     label: "idempotency key"
-    glossary_term: UNMAPPED
+    glossary_term: "Idempotency key"
     kind: input
     format: text
     constraints_visible:
@@ -171,7 +171,7 @@ data:
   - id: DAT-11
     screen: null
     label: "operator event / webhook notification"
-    glossary_term: UNMAPPED
+    glossary_term: "Operator event"
     kind: input
     format: other
     constraints_visible:
@@ -184,7 +184,7 @@ data:
   - id: DAT-12
     screen: null
     label: "payment allocation"
-    glossary_term: UNMAPPED
+    glossary_term: "Allocation"
     kind: both
     format: other
     constraints_visible: ["allocated across multiple charges; partial payments oldest-first (FR-9)"]
@@ -194,7 +194,7 @@ data:
   - id: DAT-13
     screen: null
     label: "credit / wallet (overpayment)"
-    glossary_term: UNMAPPED
+    glossary_term: "Credit / wallet"
     kind: both
     format: currency
     constraints_visible: ["over-allocation becomes credit (INV-5); overpayments held as credit/wallet (FR-12)"]
@@ -204,7 +204,7 @@ data:
   - id: DAT-14
     screen: null
     label: "dunning state / access block"
-    glossary_term: UNMAPPED
+    glossary_term: "Dunning"
     kind: both
     format: enum
     constraints_visible:
@@ -215,7 +215,7 @@ data:
   - id: DAT-15
     screen: null
     label: "invoice"
-    glossary_term: UNMAPPED
+    glossary_term: "Invoice"
     kind: both
     format: file
     constraints_visible:
@@ -227,7 +227,7 @@ data:
   - id: DAT-16
     screen: null
     label: "settlement / payout (reconciliation)"
-    glossary_term: UNMAPPED
+    glossary_term: "Settlement / Payout"
     kind: input
     format: other
     constraints_visible:
@@ -241,7 +241,7 @@ data:
   - id: DAT-17
     screen: null
     label: "operator (multi-operator routing)"
-    glossary_term: UNMAPPED
+    glossary_term: "Operator"
     kind: both
     format: enum
     constraints_visible: ["operator abstraction + cost-based routing (FR-16, DD-5)"]
@@ -251,7 +251,7 @@ data:
   - id: DAT-18
     screen: null
     label: "role (RBAC)"
-    glossary_term: UNMAPPED
+    glossary_term: "Role (RBAC)"
     kind: input
     format: enum
     constraints_visible: ["RBAC + MFA + segregation of duties (NFR-6)"]
@@ -261,7 +261,7 @@ data:
   - id: DAT-19
     screen: null
     label: "audit log entry / correlation id"
-    glossary_term: UNMAPPED
+    glossary_term: "Audit log / Correlation ID"
     kind: display
     format: other
     constraints_visible: ["immutable audit log of all financial ops; end-to-end correlation IDs (NFR-8)"]
@@ -270,17 +270,41 @@ data:
     confidence: observed
   - id: DAT-20
     screen: null
-    label: "account"
-    glossary_term: UNMAPPED
+    label: "parent account (payer)"
+    glossary_term: "Parent account"
     kind: both
     format: other
     constraints_visible:
-      - "one payer (parent) → 1+ children/students (A1)"
-      - "balance provably consistent with full operation history (Summary, INV-1)"
+      - "the single authoritative balance-bearing unit (workshop Q-1)"
+      - "parent is the primary user; owns N child sub-accounts (bank-style)"
+      - "balance provably consistent with full operation history (INV-1)"
     sample_values: []
-    evidence: "docs/prd.md:13-16 (summary), 75 (A1), 157 (INV-1)"
-    confidence: implied      # 'account' is the balance-bearing unit; PRD never fixes account == parent vs subscription vs child
-
+    evidence: "specs/payments/decisions.yaml#Q-1; docs/prd.md:75 (A1), 157 (INV-1)"
+    confidence: observed      # RESOLVED by workshop Q-1 (was implied; grain now fixed to parent-level)
+  - id: DAT-21
+    screen: null
+    label: "child sub-account"
+    glossary_term: "Child sub-account"
+    kind: both
+    format: other
+    constraints_visible:
+      - "one per child, under a parent account; NOT balance-bearing (per-child figures derived)"
+      - "added by workshop OFF-1 (not in PRD / original harvest)"
+    sample_values: []
+    evidence: "specs/payments/decisions.yaml#Q-1 (OFF-1)"
+    confidence: observed
+  - id: DAT-22
+    screen: null
+    label: "enrollment (class/course)"
+    glossary_term: "Enrollment"
+    kind: both
+    format: other
+    constraints_visible:
+      - "links a child to a classroom/course; what a subscription bills against"
+      - "attribution metadata on charges/invoices; added by workshop OFF-1"
+    sample_values: []
+    evidence: "specs/payments/decisions.yaml#Q-1 (OFF-1)"
+    confidence: observed
 # ---------------------------------------------------------------------------
 # The lifecycle state machine the PRD implies. All `implied` — the PRD names
 # states and effects in prose but draws no explicit machine. Domain-level ids.
@@ -582,3 +606,37 @@ questions:
       A8/FR-13 name the flow but not the schedule. Directly affects collection rate and
       arrears metrics (Section 4) and the churn/revenue trade-off.
     blocks: [ABS-8]
+
+
+# ---------------------------------------------------------------------------
+# RESOLUTIONS — propagated from the gap-interrogation workshop.
+# decisions.yaml is authoritative for each item's full statement + evidence.
+# Source: specs/payments/decisions.yaml (mode: workshop-captured, 2026-09-21)
+
+resolutions:
+  questions:
+    Q-1: ANSWERED       # parent-account grain; spawned OFF-1/OFF-2
+    Q-2: ESCALATED      # worst-case posture + ASM-1; PayU contract owner TBD
+    Q-3: DEFERRED       # SALDEO/KSeF out of scope this exercise
+    Q-4: ANSWERED       # maker/checker; refund threshold -> Finance
+    Q-5: ANSWERED       # Warsaw business TZ / operator settlement window
+    Q-6: ANSWERED       # dunning schedule (intervals ASM-3)
+  absences:
+    ABS-1: DECIDED      # eager balance creation
+    ABS-2: DECIDED      # own state machine; 72h EXPIRED (ASM-2)
+    ABS-3: DEFERRED     # UI, N/A (unchanged from harvest)
+    ABS-4: DECIDED      # RBAC matrix
+    ABS-5: DECIDED      # per-account row-lock, atomic increment, READ COMMITTED
+    ABS-6: DECIDED      # materialized O(1) reads, paginate, no snapshot M1
+    ABS-7: DECIDED      # retain 5y + redact PII + soft-delete; credit refunded; ESCALATED policy
+    ABS-8: DECIDED      # notification model (ASM-3)
+    ABS-9: DECIDED      # time boundaries (with Q-5)
+    ABS-10: DECIDED     # 5 retries -> DLQ, manual failover
+    ABS-11: DEFERRED    # UI, N/A (unchanged from harvest)
+    ABS-12: DECIDED     # no undo; reversing entries; bulk needs senior+dry-run
+    ABS-13: DECIDED     # parent PII only; students ID-only; invoice name at gen-time
+  new_findings: [OFF-1, OFF-2, NEW-DEBT-1, CONSTRAINT-INFRA]
+  still_open_for_human:
+    - "E-OPERATOR-CONTRACT owner (Q-2) - unassigned by CTO; name before live integration"
+    - "E-REFUND-THRESHOLD due date (Finance)"
+    - "E-RETENTION-POLICY due date (DPO/Legal)"
