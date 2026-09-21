@@ -1,0 +1,28 @@
+# assumption-register.yaml — assumptions carrying revisit triggers.
+# Appended from decisions.yaml (workshop 2026-09-21). Each must be re-checked when
+# its revisit_when trigger fires.
+
+assumptions:
+  - id: ASM-1
+    feature: payments
+    statement: "Operator webhooks are at-least-once and HMAC-signed, with no operator-supplied idempotency key (we own dedup + idempotency)."
+    revisit_when: "real PayU contract obtained / before first live integration"
+    source: decisions.yaml#Q-2
+    captured_at: 2026-09-21
+    status: open
+
+  - id: ASM-2
+    feature: payments
+    statement: "A charge with no operator confirmation expires after 72h (PENDING → EXPIRED)."
+    revisit_when: "ops confirms/observes real operator confirmation latencies"
+    source: decisions.yaml#ABS-2
+    captured_at: 2026-09-21
+    status: open   # value ratified in session; still a tunable policy number
+
+  - id: ASM-3
+    feature: payments
+    statement: "Dunning intervals 0/+3/+7/+10 → access block +14, fatigue ceiling ~5 messages/cycle."
+    revisit_when: "after M1 real collection data (arrears / collection-rate metrics, PRD §4)"
+    source: decisions.yaml#Q-6, decisions.yaml#ABS-8
+    captured_at: 2026-09-21
+    status: open
