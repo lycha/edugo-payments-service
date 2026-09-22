@@ -7,11 +7,13 @@ picks an operator per charge on a cost/market/health policy. The point is that t
 an operator — it charges through the port, and every operator's webhooks and settlements flow back
 through the *same* abstraction.
 
-**Related:** [C4 model](architecture-c4.md) · [pull auto-charge](sequence-pull-auto-charge.md) · [reconciliation](sequence-reconciliation.md) · [PRD](prd.md) (FR-16, DD-5, G6, A4, ASM-1)
+**Related:** [C4 model](architecture-c4.md) · [pull auto-charge](sequence-pull-auto-charge.md) · [reconciliation](sequence-reconciliation.md) · [PRD](../prd.md) (FR-16, DD-5, G6, A4, ASM-1)
 
 > **Scope (A4):** this iteration is **PLN only**, so in M1 PayU is the effective primary. The
 > abstraction and a second adapter are built to *prove* routing and failover; Stripe (foreign markets)
 > is designed here but wired later.
+
+_Legend: **blue marks the routing decision** under description (the Operator Router)._
 
 ## Structure — one port, N adapters
 
@@ -66,10 +68,13 @@ sequenceDiagram
     R->>P: charge (own idempotency key)
     alt operator available
         P-->>R: accepted → PENDING
-    else operator definitively unavailable
-        P-->>R: connection refused / 5xx
+    else definitively unavailable (connection refused / DNS)
+        P-->>R: no charge created
         R->>F: charge via fallback (new key)
         F-->>R: accepted → PENDING
+    else ambiguous (timeout / 5xx)
+        P-->>R: outcome unknown
+        Note over R,P: leave PENDING — never blind-retry (may double-charge); reconcile
     end
     R-->>HUB: charge routed · operator recorded on the charge
 ```

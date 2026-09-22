@@ -7,7 +7,7 @@ The recurring **pull** collection path: a scheduled billing run charges a stored
 payment is recorded to the ledger by the inbox relay in **one transaction**. This is the money path —
 where a charge becomes a `PAYMENT` ledger entry and the balance moves.
 
-**Related:** [ADR 0003 — async backbone](adr/0003-async-backbone.md) · [state machine](payment-state-machine.md) · [PRD](prd.md) (FR-1/4/6, INV-1/2/3)
+**Related:** [ADR 0003 — async backbone](../adr/0003-async-backbone.md) · [state machine](payment-state-machine.md) · [PRD](../prd.md) (FR-1/4/6, INV-1/2/3)
 
 ```mermaid
 sequenceDiagram
@@ -43,6 +43,7 @@ sequenceDiagram
         RELAY->>DB: append PAYMENT ledger entry
         RELAY->>DB: update balance (balance == Σ ledger, INV-1)
         RELAY->>DB: charge → SETTLED · mark event processed
+        Note over RELAY,DB: AUTHORIZED→SETTLED collapsed (auto-capture)
     else declined / failed
         RELAY->>DB: charge → FAILED · mark event processed
         Note over RELAY,DB: no ledger entry (INV-3) → enters dunning

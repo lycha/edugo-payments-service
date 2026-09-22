@@ -7,7 +7,7 @@ The **daily** safety net for the async collection path: ingest the operator's se
 route any divergence to the back-office queue. This is what catches a missed webhook or a drifting
 balance before it becomes a financial-correctness incident.
 
-**Related:** [ADR 0003 — async backbone](adr/0003-async-backbone.md) · [pull auto-charge sequence](sequence-pull-auto-charge.md) · [PRD](prd.md) (FR-15, DD-3, INV-1/3, §4 metrics)
+**Related:** [ADR 0003 — async backbone](../adr/0003-async-backbone.md) · [pull auto-charge sequence](sequence-pull-auto-charge.md) · [PRD](../prd.md) (FR-15, DD-3, INV-1/3, §4 metrics)
 
 ```mermaid
 sequenceDiagram

@@ -6,7 +6,7 @@ EduGo's **own** canonical charge/payment lifecycle — not operator vocabulary; 
 mapped onto these states. Source: `specs/payments/glossary.md` (state machine), `decisions.yaml`
 (ABS-2, ABS-12), `feature-inventory.yaml` (TRN-1…8), ASM-2 (72h).
 
-**Related:** [PRD](prd.md) · [glossary](../specs/payments/glossary.md)
+**Related:** [PRD](../prd.md) · [glossary](../../specs/payments/glossary.md)
 
 ```mermaid
 stateDiagram-v2

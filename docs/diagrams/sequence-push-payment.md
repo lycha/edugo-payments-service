@@ -7,7 +7,7 @@ it on the **operator's hosted page** with **Strong Customer Authentication**, an
 The redirect is UX only — the payment is recorded, exactly as in the pull path, **only** from the
 signed webhook. Payments is not a browser-facing service; the card never touches it (PCI SAQ-A).
 
-**Related:** [pull auto-charge sequence](sequence-pull-auto-charge.md) · [ADR 0004 — API auth](adr/0004-api-auth.md) · [state machine](payment-state-machine.md) · [PRD](prd.md) (FR-5, A11, INV-1/2/3)
+**Related:** [pull auto-charge sequence](sequence-pull-auto-charge.md) · [ADR 0004 — API auth](../adr/0004-api-auth.md) · [state machine](payment-state-machine.md) · [PRD](../prd.md) (FR-5, A11, INV-1/2/3)
 
 ```mermaid
 sequenceDiagram
@@ -30,12 +30,15 @@ sequenceDiagram
 
     Note over PARENT,OP: 2 — Hosted page + authentication (card stays at operator)
     PARENT->>OP: enter card + complete Strong Customer Authentication
+    Note over OP: SCA passed → charge REQUIRES_ACTION→AUTHORIZED (settles on confirmation)
     OP-->>PARENT: redirect back to EduGo
     Note over PARENT,PLAT: redirect return is UX only — NOT proof of payment
 
     Note over OP,RELAY: 3 — Authoritative result via webhook (same path as pull)
     OP->>API: POST /webhooks/operator (signed)
-    API->>DB: verify signature → INSERT operator_events (dedup) → 200 ACK
+    API->>DB: verify signature → INSERT operator_events (dedup)
+    API-->>OP: 200 ACK (fast, no business logic)
+    Note over RELAY,DB: inbox relay tick (~1 min): claim rows FOR UPDATE SKIP LOCKED
     rect rgb(230,240,255)
     Note over RELAY,DB: one DB transaction — exactly-once (INV-2/3)
     RELAY->>DB: append PAYMENT ledger entry + update balance (INV-1)<br/>charge → SETTLED (or FAILED)

@@ -5,11 +5,13 @@
 C4 model derived from the specs, in three levels. Diagrams are Mermaid flowcharts (render on
 GitHub); labels are kept short — see the ADRs for the detail.
 
-**Related:** [PRD](prd.md) · [ADR 0002 — deployment](adr/0002-deployment-and-infrastructure.md) · [ADR 0003 — async backbone](adr/0003-async-backbone.md) · [ADR 0004 — API auth](adr/0004-api-auth.md)
+**Related:** [PRD](../prd.md) · [ADR 0002 — deployment](../adr/0002-deployment-and-infrastructure.md) · [ADR 0003 — async backbone](../adr/0003-async-backbone.md) · [ADR 0004 — API auth](../adr/0004-api-auth.md)
 
 Three facts the model encodes: the service is **standalone, service-to-service, private-by-default**
 (one REST API); the **only public ingress** is the operator-webhook path; async is **Postgres +
 CronJobs only**, status is **pull-based** (no bus, no outbox).
+
+> **Legend:** in every diagram below, **blue marks the elements under description** — the service (Level 1), its containers (Level 2), and its components (Level 3).
 
 ---
 
