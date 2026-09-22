@@ -1,0 +1,1602 @@
+openapi: 3.0.3
+info:
+  title: EduGo Payments Service
+  version: 0.2.0-draft
+  description: >
+    DESIGNED CONTRACT (Phase 4) for the payments feature, derived from
+    `specs/payments/spec.md` (AC-1..AC-50, INV-1..INV-7). This is the review
+    surface for the API; it is NOT yet the live contract. Operations are promoted
+    into `openapi/openapi.yaml` — together with their Fastify handler — one vertical
+    slice at a time (fastify-openapi-glue binds by operationId, so an operation
+    without a handler must not appear in the live file). `health` and `recordPayment`
+    below are carried over verbatim from the live contract.
+
+    Conventions (kept identical to the live contract):
+    - operationId binds the route; DTO types are generated from these schemas.
+    - Money is INTEGER MINOR UNITS (grosze for PLN), format int64. Never floats (NFR-10).
+    - Errors are application/problem+json (RFC 9457). Error mapping is centralised in
+      the server: AccountNotFoundError → 404, other DomainError → 422, ajv → 400, else 500.
+    - Idempotency-Key header is REQUIRED on every money-moving mutation (PR-005 / AC-17).
+    - Traceability: operation descriptions cite the acceptance criteria they realise.
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: Health
+  - name: Accounts
+  - name: Enrollments & Subscriptions
+  - name: Charges
+  - name: Payments
+  - name: Operator events
+  - name: Refunds
+  - name: Adjustments
+  - name: Disbursements
+  - name: Invoices
+  - name: Dunning
+  - name: Reconciliation
+
+# Default: every operation requires an OIDC/JWT bearer token (ADR-0004 / ASM-4);
+# the actor identity (sub, role, acr/MFA) drives RBAC (AC-48) and maker/checker
+# (AC-23/AC-24). The operator webhook overrides this with HMAC (AC-14).
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------------------------------------------------------------------
+  /health:
+    get:
+      operationId: healthCheck
+      tags: [Health]
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  # ---------------------------------------------------------------------------
+  # Accounts, balances, ledger  (AC-1, AC-2, AC-3, AC-4, AC-48, AC-49)
+  /accounts:
+    post:
+      operationId: onboardAccount
+      tags: [Accounts]
+      summary: Onboard a parent account
+      description: >
+        Creates the parent account together with a zero-initialised balance row,
+        before any charge (AC-1, INV-1 holds from t=0). Parent billing information
+        is the only PII stored (AC-49). Idempotent via Idempotency-Key.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OnboardAccountRequest'
+      responses:
+        '201':
+          description: Account onboarded with a zero balance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '200':
+          description: Idempotent replay — account already onboarded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /accounts/{accountId}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      operationId: getAccount
+      tags: [Accounts]
+      summary: Get a parent account
+      description: A Parent may read only their own account (AC-48).
+      responses:
+        '200':
+          description: The account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /accounts/{accountId}/balance:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      operationId: getAccountBalance
+      tags: [Accounts]
+      summary: Get the materialized parent balance
+      description: >
+        Returns the materialized balance in O(1) without recomputing over ledger
+        history (AC-3). Positive = credit, negative = arrears, zero = settled.
+      responses:
+        '200':
+          description: The current balance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Balance' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /accounts/{accountId}/ledger:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      operationId: listLedgerEntries
+      tags: [Accounts]
+      summary: List an account's ledger entries (paginated)
+      description: Append-only ledger; results are paginated (AC-4). Newest first.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: entryType
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/EntryType' }
+      responses:
+        '200':
+          description: A page of ledger entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/LedgerEntry' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /accounts/{accountId}/sub-accounts:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      operationId: listChildSubAccounts
+      tags: [Accounts]
+      summary: List a parent's child sub-accounts
+      description: Child sub-accounts are not balance-bearing; per-child figures are derived (AC-2).
+      responses:
+        '200':
+          description: The child sub-accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ChildSubAccount' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: addChildSubAccount
+      tags: [Accounts]
+      summary: Add a child sub-account under a parent
+      description: >
+        The child is referenced by internal student ID only; no student PII is stored (AC-49).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [studentId]
+              properties:
+                studentId:
+                  type: string
+                  description: Internal ID of the student in the (out-of-scope) student system.
+      responses:
+        '201':
+          description: Child sub-account created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChildSubAccount' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Enrollments & subscriptions  (AC-2, AC-38, AC-39)
+  /enrollments:
+    post:
+      operationId: createEnrollment
+      tags: [Enrollments & Subscriptions]
+      summary: Enroll a child in a classroom/course
+      description: An enrollment links a child sub-account to a course; it is what a subscription bills against (AC-2).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [childSubAccountId, courseRef]
+              properties:
+                childSubAccountId: { type: string, format: uuid }
+                courseRef: { type: string, description: Reference to the classroom/course. }
+      responses:
+        '201':
+          description: Enrollment created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Enrollment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /subscriptions:
+    post:
+      operationId: createSubscription
+      tags: [Enrollments & Subscriptions]
+      summary: Create a monthly subscription for an enrollment
+      description: Fixed monthly fee billed on the account's billing day, in Europe/Warsaw (AC-34); billing day 29-31 clamps to month-end (AC-35).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enrollmentId, monthlyFeeMinor, currency, billingDay]
+              properties:
+                enrollmentId: { type: string, format: uuid }
+                monthlyFeeMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+                currency: { $ref: '#/components/schemas/Currency' }
+                billingDay:
+                  type: integer
+                  minimum: 1
+                  maximum: 31
+                  description: Day of month (Europe/Warsaw); values 29-31 clamp to month-end (AC-35).
+      responses:
+        '201':
+          description: Subscription created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subscription' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /subscriptions/{subscriptionId}:
+    parameters:
+      - name: subscriptionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getSubscription
+      tags: [Enrollments & Subscriptions]
+      summary: Get a subscription
+      responses:
+        '200':
+          description: The subscription
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subscription' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /subscriptions/{subscriptionId}/cancellation:
+    parameters:
+      - name: subscriptionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: cancelSubscription
+      tags: [Enrollments & Subscriptions]
+      summary: Cancel a subscription
+      description: >
+        Stops future billing and prorates the current charge; the account and ledger
+        are retained (AC-38). Residual credit is refunded and residual arrears survive
+        (AC-39). Idempotent via Idempotency-Key.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Subscription cancelled; proration applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subscription' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  # ---------------------------------------------------------------------------
+  # Charges  (AC-11, AC-19, AC-29..AC-33)
+  /charges:
+    post:
+      operationId: createCharge
+      tags: [Charges]
+      summary: Create a charge (new-order first charge)
+      description: >
+        Posts a CHARGE against an enrollment. The tax breakdown (net/tax/gross +
+        treatment + jurisdiction) is resolved from the effective-dated rate table
+        (AC-29, AC-32); the GROSS amount posts to the ledger as a negative entry
+        (AC-30, sign convention). Subsequent charges are produced by the billing run.
+        Idempotent via Idempotency-Key.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enrollmentId, netMinor, currency]
+              properties:
+                enrollmentId: { type: string, format: uuid }
+                netMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+                currency: { $ref: '#/components/schemas/Currency' }
+      responses:
+        '201':
+          description: Charge created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Charge' }
+        '200':
+          description: Idempotent replay — charge already created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Charge' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /charges/{chargeId}:
+    parameters:
+      - name: chargeId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getCharge
+      tags: [Charges]
+      summary: Get a charge and its lifecycle state
+      description: Reflects the canonical charge/payment state machine (AC-11).
+      responses:
+        '200':
+          description: The charge
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Charge' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /accounts/{accountId}/charges:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      operationId: listCharges
+      tags: [Charges]
+      summary: List an account's charges (paginated)
+      description: Open charges drive oldest-first allocation (AC-19).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ChargeStatus' }
+      responses:
+        '200':
+          description: A page of charges
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/Charge' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Payments  (AC-13, AC-17, AC-18, AC-19, AC-47)
+  /payments:
+    post:
+      operationId: recordPayment
+      tags: [Payments]
+      summary: Record a payment against an account
+      description: >
+        Appends a PAYMENT ledger entry and updates the account balance atomically.
+        Idempotent via the Idempotency-Key header — repeating the same key returns
+        the original result without posting a second entry.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordPaymentRequest'
+      responses:
+        '201':
+          description: Payment recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRecorded'
+        '200':
+          description: Idempotent replay — payment already recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRecorded'
+        '404':
+          description: Account not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Domain rule violation
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /payment-intents:
+    post:
+      operationId: initiatePushPayment
+      tags: [Payments]
+      summary: Initiate a parent push payment (hosted page)
+      description: >
+        Parent-initiated push via the operator's hosted page/redirect (AC-47, FR-5).
+        Push payments are accepted even while pull processing is degraded (AC-47).
+        The PAYMENT ledger entry is recorded later, only on operator confirmation
+        (AC-13, INV-3). Idempotent via Idempotency-Key.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accountId, amountMinor, currency]
+              properties:
+                accountId: { type: string, format: uuid }
+                amountMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+                currency: { $ref: '#/components/schemas/Currency' }
+                chargeIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                  description: Optional charges this payment is intended to settle.
+      responses:
+        '201':
+          description: Payment intent created; redirect the parent to the hosted page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentIntent' }
+        '200':
+          description: Idempotent replay — intent already created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentIntent' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /payments/{paymentId}:
+    parameters:
+      - name: paymentId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getPayment
+      tags: [Payments]
+      summary: Get a payment
+      responses:
+        '200':
+          description: The payment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Operator events (webhook)  (AC-13, AC-14, AC-15, AC-16, INV-2, INV-3)
+  /operator-events/{operator}:
+    parameters:
+      - name: operator
+        in: path
+        required: true
+        schema: { type: string, example: payu }
+        description: The operator that sent the event (e.g. payu).
+    post:
+      operationId: receiveOperatorEvent
+      tags: [Operator events]
+      summary: Receive an operator webhook notification
+      description: >
+        HMAC-verified inbound operator event. A failed signature is rejected with no
+        ledger effect (AC-14). The event is deduped on (operator, operatorEventId) and
+        applied at most once, tolerating out-of-order and redelivered events (AC-15,
+        INV-2). No PAYMENT is recorded without a matching confirmation (AC-13, INV-3).
+        Authenticated by HMAC signature, not a bearer token.
+      security: []
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          description: HMAC signature of the raw request body (ASM-1).
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperatorEvent' }
+      responses:
+        '202':
+          description: Accepted and enqueued for transactional processing
+        '200':
+          description: Duplicate event — no-op (already applied, INV-2)
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: HMAC verification failed
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  # ---------------------------------------------------------------------------
+  # Refunds  (AC-23, AC-24, AC-25, AC-28)  — maker/checker
+  /refunds:
+    post:
+      operationId: initiateRefund
+      tags: [Refunds]
+      summary: Initiate a refund (maker)
+      description: >
+        The authenticated actor is the maker. A refund at or below 100 PLN
+        (10000 minor units) is auto-approved; above it requires a checker (AC-28,
+        AC-23). A refund that would make cumulative refunds exceed the captured
+        amount is rejected (AC-25, INV-6). Requires an Idempotency-Key (AC-17, PR-005).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [paymentId, amountMinor, reason]
+              properties:
+                paymentId: { type: string, format: uuid }
+                amountMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+                reason: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Refund created (PENDING_APPROVAL, or APPROVED if auto-approved)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Refund' }
+        '200':
+          description: Idempotent replay — refund already initiated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Refund' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Domain rule violation (e.g. over-refund, INV-6)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /refunds/{refundId}:
+    parameters:
+      - name: refundId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getRefund
+      tags: [Refunds]
+      summary: Get a refund
+      responses:
+        '200':
+          description: The refund
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Refund' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /refunds/{refundId}/approval:
+    parameters:
+      - name: refundId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: approveRefund
+      tags: [Refunds]
+      summary: Approve or reject a refund (checker)
+      description: >
+        The checker must be a different user from the maker; self-approval is
+        rejected (AC-23). On approval both identities and a correlation id are written
+        to the immutable audit log (AC-24).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalDecision' }
+      responses:
+        '200':
+          description: Decision applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Refund' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Self-approval or invalid state transition
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  # ---------------------------------------------------------------------------
+  # Adjustments  (AC-10, AC-23, AC-27)  — maker/checker
+  /adjustments:
+    post:
+      operationId: initiateAdjustment
+      tags: [Adjustments]
+      summary: Initiate a manual adjustment (maker)
+      description: >
+        Records a correction as a NEW signed ADJUSTMENT entry — never an in-place
+        edit (AC-10, INV-4). Requires maker/checker (AC-23) and an Idempotency-Key
+        (AC-17, PR-005).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accountId, amountMinor, reason]
+              properties:
+                accountId: { type: string, format: uuid }
+                amountMinor: { $ref: '#/components/schemas/MoneyMinorSigned' }
+                reason: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Adjustment created (PENDING_APPROVAL)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Adjustment' }
+        '200':
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Adjustment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /adjustments/{adjustmentId}/approval:
+    parameters:
+      - name: adjustmentId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: approveAdjustment
+      tags: [Adjustments]
+      summary: Approve or reject an adjustment (checker)
+      description: Different checker from the maker; both identities audited (AC-23, AC-24).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalDecision' }
+      responses:
+        '200':
+          description: Decision applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Adjustment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /adjustment-batches:
+    post:
+      operationId: createAdjustmentBatch
+      tags: [Adjustments]
+      summary: Prepare a bulk correction (senior approval + mandatory dry-run)
+      description: >
+        Bulk corrections require senior approval and a completed dry-run before
+        execution; each entry is logged individually (AC-27). Submit with dryRun=true
+        first to preview per-entry outcomes.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [dryRun, entries, reason]
+              properties:
+                dryRun:
+                  type: boolean
+                  description: When true, preview outcomes without posting entries (AC-27).
+                reason: { type: string, minLength: 1 }
+                entries:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [accountId, amountMinor]
+                    properties:
+                      accountId: { type: string, format: uuid }
+                      amountMinor: { $ref: '#/components/schemas/MoneyMinorSigned' }
+      responses:
+        '200':
+          description: Dry-run result — per-entry outcomes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdjustmentBatch' }
+        '201':
+          description: Batch submitted for senior approval
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdjustmentBatch' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  # ---------------------------------------------------------------------------
+  # Disbursements  (AC-22)  — maker/checker manual payout of residual credit
+  /disbursements:
+    post:
+      operationId: initiateDisbursement
+      tags: [Disbursements]
+      summary: Initiate a manual credit disbursement (maker)
+      description: >
+        Returns residual credit that has no refundable original capture, via a
+        bank-transfer payout — an audited maker/checker action (AC-22). Requires an
+        Idempotency-Key (AC-17).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accountId, amountMinor, bankTransferRef, reason]
+              properties:
+                accountId: { type: string, format: uuid }
+                amountMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+                bankTransferRef: { type: string, minLength: 1 }
+                reason: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Disbursement created (PENDING_APPROVAL)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Disbursement' }
+        '200':
+          description: Idempotent replay
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Disbursement' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /disbursements/{disbursementId}/approval:
+    parameters:
+      - name: disbursementId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: approveDisbursement
+      tags: [Disbursements]
+      summary: Approve or reject a disbursement (checker)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalDecision' }
+      responses:
+        '200':
+          description: Decision applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Disbursement' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  # ---------------------------------------------------------------------------
+  # Invoices  (AC-29, AC-33, AC-50)
+  /invoices:
+    post:
+      operationId: generateInvoice
+      tags: [Invoices]
+      summary: Generate an invoice on demand
+      description: >
+        Produces an invoice showing the net/tax/gross breakdown with tax treatment
+        per line (AC-29); EXEMPT/ZERO_RATED lines are shown with their legal reason
+        and zero tax, never omitted (AC-33). Student name and enrollment are rendered
+        at generation time and not stored in payments (AC-50). Idempotent.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accountId, chargeIds]
+              properties:
+                accountId: { type: string, format: uuid }
+                chargeIds:
+                  type: array
+                  minItems: 1
+                  items: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Invoice generated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '200':
+          description: Idempotent replay — invoice already generated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /invoices/{invoiceId}:
+    parameters:
+      - name: invoiceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getInvoice
+      tags: [Invoices]
+      summary: Get an invoice
+      responses:
+        '200':
+          description: The invoice
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # Dunning  (AC-16, AC-23, AC-41, AC-43)
+  /accounts/{accountId}/dunning:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      operationId: getDunningState
+      tags: [Dunning]
+      summary: Get an account's dunning state
+      description: >
+        Reflects the dunning cycle (Day 0/+3/+7/+10 → access block +14; AC-41) and
+        whether access is currently blocked; recovery clears it on any successful
+        payment (AC-43). FAILED/DECLINED charges enter dunning; EXPIRED do not (AC-16).
+      responses:
+        '200':
+          description: The dunning state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DunningState' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /dunning-overrides:
+    post:
+      operationId: initiateDunningOverride
+      tags: [Dunning]
+      summary: Initiate a dunning override (maker)
+      description: Manual pause or unblock; requires maker/checker (AC-23) and is audited (AC-24).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accountId, action, reason]
+              properties:
+                accountId: { type: string, format: uuid }
+                action:
+                  type: string
+                  enum: [UNBLOCK, PAUSE, RESUME]
+                reason: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Override created (PENDING_APPROVAL)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DunningOverride' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /dunning-overrides/{overrideId}/approval:
+    parameters:
+      - name: overrideId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: approveDunningOverride
+      tags: [Dunning]
+      summary: Approve or reject a dunning override (checker)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalDecision' }
+      responses:
+        '200':
+          description: Decision applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DunningOverride' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  # ---------------------------------------------------------------------------
+  # Reconciliation  (AC-44)
+  /reconciliation/mismatches:
+    get:
+      operationId: listReconciliationMismatches
+      tags: [Reconciliation]
+      summary: List reconciliation mismatches (back-office queue)
+      description: >
+        The three-way match routes mismatches to the back-office queue with an ops
+        alert — never the parent — detected within 24h (AC-44). Back-office roles only.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [OPEN, RESOLVED] }
+      responses:
+        '200':
+          description: A page of mismatches
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/ReconciliationMismatch' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /reconciliation/mismatches/{mismatchId}:
+    parameters:
+      - name: mismatchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReconciliationMismatch
+      tags: [Reconciliation]
+      summary: Get a reconciliation mismatch
+      responses:
+        '200':
+          description: The mismatch
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconciliationMismatch' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OIDC/JWT access token from the EduGo central IdP (ADR-0004 / ASM-4).
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client-generated key that makes this operation exactly-once (AC-17, PR-005).
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 200
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous page's nextCursor.
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Malformed request (schema validation, ajv → 400)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: Authenticated but not permitted for this resource (RBAC, AC-48)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    UnprocessableEntity:
+      description: Domain rule violation
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    # --- Shared value types --------------------------------------------------
+    Currency:
+      type: string
+      enum: [PLN]
+      description: >
+        ISO-4217 currency code. The data layer is currency-generic, but operational
+        scope is PLN-only this iteration (A4, PR-003); a non-PLN value is rejected (AC-8).
+    MoneyMinorPositive:
+      type: integer
+      format: int64
+      minimum: 1
+      description: Amount in minor units (grosze for PLN); positive. Never a float (NFR-10).
+    MoneyMinorSigned:
+      type: integer
+      format: int64
+      description: Signed amount in minor units (grosze). Never a float (NFR-10).
+    EntryType:
+      type: string
+      enum: [CHARGE, PAYMENT, REFUND, PARTIAL_REFUND, DISCOUNT, LATE_FEE, ADJUSTMENT, CREDIT, FEE, CHARGEBACK]
+    ChargeStatus:
+      type: string
+      description: Canonical charge/payment state machine (AC-11).
+      enum: [PENDING, REQUIRES_ACTION, AUTHORIZED, SETTLED, DECLINED, EXPIRED, FAILED]
+    MakerCheckerStatus:
+      type: string
+      enum: [PENDING_APPROVAL, APPROVED, REJECTED, EXECUTED]
+    TaxTreatment:
+      type: string
+      enum: [STANDARD, REDUCED, ZERO_RATED, EXEMPT]
+    Page:
+      type: object
+      description: Cursor pagination envelope.
+      required: [nextCursor]
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor for the next page, or null when this is the last page.
+    TaxBreakdown:
+      type: object
+      additionalProperties: false
+      description: 'Per-line tax breakdown (AC-29). Invariant INV-7: grossMinor == netMinor + taxMinor.'
+      required: [netMinor, taxMinor, grossMinor, taxRate, taxTreatment, taxJurisdiction]
+      properties:
+        netMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+        taxMinor:
+          type: integer
+          format: int64
+          minimum: 0
+        grossMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+        taxRate:
+          type: number
+          description: Effective rate, e.g. 0.23 for 23%; 0 for EXEMPT/ZERO_RATED.
+        taxTreatment: { $ref: '#/components/schemas/TaxTreatment' }
+        taxLegalReason:
+          type: string
+          description: Legal reason code, required for EXEMPT/ZERO_RATED (AC-33).
+        taxJurisdiction:
+          type: string
+          example: PL
+    Actor:
+      type: object
+      additionalProperties: false
+      description: An authenticated actor (from the JWT sub/role, ASM-4).
+      required: [actorId, role]
+      properties:
+        actorId: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+    Role:
+      type: string
+      enum: [PARENT, ADMIN, ACCOUNTING]
+      description: RBAC roles (AC-48). Students have no payments access.
+    ApprovalDecision:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [APPROVE, REJECT]
+        note:
+          type: string
+
+    # --- Accounts ------------------------------------------------------------
+    OnboardAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [billingContact, currency]
+      properties:
+        externalRef:
+          type: string
+          description: Optional external reference for the parent.
+        currency: { $ref: '#/components/schemas/Currency' }
+        billingContact: { $ref: '#/components/schemas/BillingContact' }
+    BillingContact:
+      type: object
+      additionalProperties: false
+      description: Parent billing information — the only PII stored in payments (AC-49).
+      required: [name, email]
+      properties:
+        name: { type: string, minLength: 1 }
+        email: { type: string, format: email }
+        taxId: { type: string }
+        addressLine: { type: string }
+        postalCode: { type: string }
+        city: { type: string }
+        countryCode: { type: string, example: PL }
+    Account:
+      type: object
+      additionalProperties: false
+      required: [id, currency, balanceMinor, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        externalRef: { type: string, nullable: true }
+        currency: { $ref: '#/components/schemas/Currency' }
+        balanceMinor:
+          $ref: '#/components/schemas/MoneyMinorSigned'
+        billingContact: { $ref: '#/components/schemas/BillingContact' }
+        createdAt: { type: string, format: date-time }
+    Balance:
+      type: object
+      additionalProperties: false
+      required: [accountId, balanceMinor, currency, updatedAt]
+      properties:
+        accountId: { type: string, format: uuid }
+        balanceMinor:
+          $ref: '#/components/schemas/MoneyMinorSigned'
+        currency: { $ref: '#/components/schemas/Currency' }
+        updatedAt: { type: string, format: date-time }
+    ChildSubAccount:
+      type: object
+      additionalProperties: false
+      required: [id, accountId, studentId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        studentId: { type: string, description: Internal student ID only; no PII (AC-49). }
+        createdAt: { type: string, format: date-time }
+    Enrollment:
+      type: object
+      additionalProperties: false
+      required: [id, childSubAccountId, courseRef, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        childSubAccountId: { type: string, format: uuid }
+        courseRef: { type: string }
+        createdAt: { type: string, format: date-time }
+    Subscription:
+      type: object
+      additionalProperties: false
+      required: [id, enrollmentId, monthlyFeeMinor, currency, billingDay, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        enrollmentId: { type: string, format: uuid }
+        monthlyFeeMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        billingDay: { type: integer, minimum: 1, maximum: 31 }
+        status:
+          type: string
+          enum: [ACTIVE, CANCELLED]
+        createdAt: { type: string, format: date-time }
+
+    # --- Ledger, charges, payments ------------------------------------------
+    LedgerEntry:
+      type: object
+      additionalProperties: false
+      required: [id, accountId, entryType, amountMinor, currency, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        entryType: { $ref: '#/components/schemas/EntryType' }
+        amountMinor:
+          $ref: '#/components/schemas/MoneyMinorSigned'
+        currency: { $ref: '#/components/schemas/Currency' }
+        reference: { type: string, nullable: true }
+        paymentId: { type: string, format: uuid, nullable: true }
+        createdAt: { type: string, format: date-time }
+    Charge:
+      type: object
+      additionalProperties: false
+      required: [id, accountId, enrollmentId, status, currency, tax, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        enrollmentId: { type: string, format: uuid }
+        studentId: { type: string }
+        status: { $ref: '#/components/schemas/ChargeStatus' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        tax:
+          $ref: '#/components/schemas/TaxBreakdown'
+        amountOwedMinor:
+          allOf:
+            - $ref: '#/components/schemas/MoneyMinorSigned'
+          description: Remaining owed on this charge (gross), signed per the ledger convention.
+        createdAt: { type: string, format: date-time }
+    RecordPaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [accountId, amountMinor, currency]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        amountMinor:
+          type: integer
+          minimum: 1
+          description: Amount in minor units (grosze).
+        currency:
+          type: string
+          enum: [PLN]
+        operatorReference:
+          type: string
+          description: Reference at the payment operator (e.g. transaction id).
+    PaymentRecorded:
+      type: object
+      additionalProperties: false
+      required: [paymentId, accountId, balanceMinor, currency, replayed]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        balanceMinor:
+          type: integer
+          description: Account balance after the payment, in minor units.
+        currency:
+          type: string
+        replayed:
+          type: boolean
+          description: True when this response is an idempotent replay.
+    Payment:
+      type: object
+      additionalProperties: false
+      required: [id, accountId, amountMinor, currency, direction, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        amountMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        direction:
+          type: string
+          enum: [PUSH, PULL]
+        status: { $ref: '#/components/schemas/ChargeStatus' }
+        operatorReference: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    PaymentIntent:
+      type: object
+      additionalProperties: false
+      required: [id, accountId, amountMinor, currency, status, redirectUrl, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        amountMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        status:
+          type: string
+          enum: [CREATED, REDIRECTED, CONFIRMED, EXPIRED]
+        redirectUrl:
+          type: string
+          format: uri
+          description: Operator hosted-page URL to redirect the parent to.
+        createdAt: { type: string, format: date-time }
+
+    # --- Operator events -----------------------------------------------------
+    OperatorEvent:
+      type: object
+      description: Raw operator notification. Deduped on (operator, operatorEventId) (AC-15).
+      required: [operatorEventId, type]
+      properties:
+        operatorEventId:
+          type: string
+          description: The operator's own event id; the dedup key with the path operator.
+        type:
+          type: string
+          description: Operator event type (mapped onto our own state machine, AC-11).
+        occurredAt: { type: string, format: date-time }
+        payload:
+          type: object
+          description: Operator-specific payload; interpreted by the operator adapter.
+          additionalProperties: true
+
+    # --- Corrections ---------------------------------------------------------
+    Refund:
+      type: object
+      additionalProperties: false
+      required: [id, paymentId, amountMinor, currency, status, maker, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        paymentId: { type: string, format: uuid }
+        amountMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        reason: { type: string }
+        status: { $ref: '#/components/schemas/MakerCheckerStatus' }
+        autoApproved:
+          type: boolean
+          description: True when at or below the 100 PLN threshold and no checker was required (AC-28).
+        maker: { $ref: '#/components/schemas/Actor' }
+        checker:
+          allOf:
+            - $ref: '#/components/schemas/Actor'
+          nullable: true
+        correlationId: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    Adjustment:
+      type: object
+      additionalProperties: false
+      required: [id, accountId, amountMinor, currency, status, maker, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        amountMinor: { $ref: '#/components/schemas/MoneyMinorSigned' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        reason: { type: string }
+        status: { $ref: '#/components/schemas/MakerCheckerStatus' }
+        maker: { $ref: '#/components/schemas/Actor' }
+        checker:
+          allOf:
+            - $ref: '#/components/schemas/Actor'
+          nullable: true
+        appliedEntryId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The ledger entry created on execution (AC-10).
+        correlationId: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    AdjustmentBatch:
+      type: object
+      additionalProperties: false
+      required: [id, dryRun, status, results, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        dryRun: { type: boolean }
+        status:
+          type: string
+          enum: [DRY_RUN, PENDING_SENIOR_APPROVAL, APPROVED, EXECUTED, REJECTED]
+        results:
+          type: array
+          description: Per-entry outcome, logged individually (AC-27).
+          items:
+            type: object
+            additionalProperties: false
+            required: [accountId, amountMinor, outcome]
+            properties:
+              accountId: { type: string, format: uuid }
+              amountMinor: { $ref: '#/components/schemas/MoneyMinorSigned' }
+              outcome:
+                type: string
+                enum: [WOULD_APPLY, APPLIED, REJECTED]
+              detail: { type: string }
+        createdAt: { type: string, format: date-time }
+    Disbursement:
+      type: object
+      additionalProperties: false
+      required: [id, accountId, amountMinor, currency, status, maker, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        amountMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        bankTransferRef: { type: string }
+        reason: { type: string }
+        status: { $ref: '#/components/schemas/MakerCheckerStatus' }
+        maker: { $ref: '#/components/schemas/Actor' }
+        checker:
+          allOf:
+            - $ref: '#/components/schemas/Actor'
+          nullable: true
+        createdAt: { type: string, format: date-time }
+
+    # --- Invoices ------------------------------------------------------------
+    Invoice:
+      type: object
+      additionalProperties: false
+      required: [id, accountId, number, issuedAt, currency, lines, totals]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        number: { type: string }
+        issuedAt: { type: string, format: date-time }
+        currency: { $ref: '#/components/schemas/Currency' }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/InvoiceLine' }
+        totals:
+          type: object
+          additionalProperties: false
+          required: [netMinor, taxMinor, grossMinor]
+          properties:
+            netMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+            taxMinor: { type: integer, format: int64, minimum: 0 }
+            grossMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
+    InvoiceLine:
+      type: object
+      additionalProperties: false
+      required: [description, tax]
+      properties:
+        chargeId: { type: string, format: uuid }
+        description: { type: string }
+        studentName:
+          type: string
+          description: Rendered at generation time from the student system; not stored (AC-50).
+        enrollmentRef: { type: string }
+        tax: { $ref: '#/components/schemas/TaxBreakdown' }
+
+    # --- Dunning & reconciliation -------------------------------------------
+    DunningState:
+      type: object
+      additionalProperties: false
+      required: [accountId, status, accessBlocked]
+      properties:
+        accountId: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [NONE, IN_DUNNING, BLOCKED]
+        accessBlocked: { type: boolean }
+        currentStep:
+          type: string
+          nullable: true
+          enum: [DAY_0, DAY_3, DAY_7, DAY_10, DAY_14_BLOCK]
+        messagesSentThisCycle:
+          type: integer
+          minimum: 0
+          maximum: 5
+          description: Max 5 per cycle — one per step incl. the +14 block notice (AC-42, FU-2).
+        nextActionAt: { type: string, format: date-time, nullable: true }
+    DunningOverride:
+      type: object
+      additionalProperties: false
+      required: [id, accountId, action, status, maker, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        action:
+          type: string
+          enum: [UNBLOCK, PAUSE, RESUME]
+        reason: { type: string }
+        status: { $ref: '#/components/schemas/MakerCheckerStatus' }
+        maker: { $ref: '#/components/schemas/Actor' }
+        checker:
+          allOf:
+            - $ref: '#/components/schemas/Actor'
+          nullable: true
+        createdAt: { type: string, format: date-time }
+    ReconciliationMismatch:
+      type: object
+      additionalProperties: false
+      required: [id, kind, status, detectedAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind:
+          type: string
+          description: e.g. LEDGER_WITHOUT_SETTLEMENT, SETTLEMENT_WITHOUT_LEDGER, AMOUNT_DIFF, PAYOUT_TOTAL_DIFF.
+        status:
+          type: string
+          enum: [OPEN, RESOLVED]
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+          description: By drift amount (thresholds pending real reconciliation data).
+        accountId: { type: string, format: uuid, nullable: true }
+        paymentId: { type: string, format: uuid, nullable: true }
+        driftMinor:
+          $ref: '#/components/schemas/MoneyMinorSigned'
+        settlementWindow:
+          type: string
+          description: Operator settlement window this mismatch belongs to (AC-37).
+        detectedAt: { type: string, format: date-time }
+
+    # --- Errors --------------------------------------------------------------
+    Problem:
+      type: object
+      description: RFC 9457 problem detail.
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
