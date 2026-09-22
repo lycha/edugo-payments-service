@@ -18,6 +18,22 @@
 --     (deleted_at) + PII redaction (AC-40) — the ledger is append-only (INV-4).
 --   * Every money-moving mutation table carries its own idempotency_key UNIQUE (PR-005/AC-17).
 --
+-- Post-review hardening (peer-review-schema.md):
+--   * operator_events carries the ADR-0003 retry/backoff/DLQ columns (PR-S1).
+--   * FK columns and time-sweep queries are indexed (PR-S2/PR-S7).
+--   * Conditional tax-reason NOT NULL for EXEMPT/ZERO_RATED is enforced (PR-S4).
+--   * Ledger↔source link is single-direction — the correction row points at its
+--     ledger entry (source.ledger_entry_id); ledger_entries points only at the charge
+--     it realises. No bidirectional/redundant FK, no cycle (PR-S5). This also keeps
+--     ledger_entries strictly INSERT-only: a reversing entry is inserted, then the
+--     refund/adjustment row is updated — the ledger row is never mutated.
+--   * updated_at is maintained by a BEFORE UPDATE trigger (PR-S6).
+--   * ledger_entries + audit_log are append-only, enforced by a trigger (PR-S9).
+--   * Base-table currency columns get the same shape CHECK as the new tables (PR-S8).
+--   * Cross-currency equality between related money rows is NOT enforced at the DB for
+--     M1 — it is gated by PLN-only (AC-8) in the app; composite-FK hardening is deferred
+--     to when multi-currency actually lands (PR-S3).
+--
 -- Promotion: split into node-pg-migrate migrations under db/migrations/, run
 -- `pnpm db:migrate`, then `pnpm codegen:db` to regenerate the Kysely types.
 -- ============================================================================
@@ -25,6 +41,21 @@
 -- Up Migration
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Shared trigger helpers (PR-S6, PR-S9).
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Append-only guard: block UPDATE/DELETE on immutable tables (INV-4, NFR-8).
+CREATE OR REPLACE FUNCTION forbid_mutation() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'append-only table %: % is not allowed', TG_TABLE_NAME, TG_OP;
+END;
+$$ LANGUAGE plpgsql;
 
 -- ----------------------------------------------------------------------------
 -- 1. Parent-account aggregate: accounts (evolve) + billing PII + children + enrollments
@@ -89,7 +120,10 @@ CREATE TABLE tax_rates (
   valid_to     date,                                                  -- NULL = open-ended
   created_at   timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT tax_rates_key_from_uniq UNIQUE (jurisdiction, category, valid_from),
-  CONSTRAINT tax_rates_valid_range_chk CHECK (valid_to IS NULL OR valid_to > valid_from)
+  CONSTRAINT tax_rates_valid_range_chk CHECK (valid_to IS NULL OR valid_to > valid_from),
+  -- AC-33: a zero-tax treatment must carry its legal basis (PR-S4).
+  CONSTRAINT tax_rates_legal_reason_chk
+    CHECK (treatment NOT IN ('EXEMPT', 'ZERO_RATED') OR legal_reason IS NOT NULL)
 );
 CREATE INDEX tax_rates_lookup_idx ON tax_rates (jurisdiction, category, valid_from DESC);
 
@@ -110,6 +144,8 @@ CREATE TABLE subscriptions (
 CREATE INDEX subscriptions_enrollment_id_idx ON subscriptions (enrollment_id);
 
 -- A charge is an amount owed with its full tax breakdown; gross posts to the ledger (PR-009).
+-- NOTE (PR-S3): currency equality between a charge and the payments/allocations applied to it
+-- is app-enforced for M1 (PLN-only, AC-8); not a DB constraint until multi-currency lands.
 CREATE TABLE charges (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id     uuid NOT NULL REFERENCES accounts (id) ON DELETE RESTRICT,
@@ -133,10 +169,16 @@ CREATE TABLE charges (
   created_at     timestamptz NOT NULL DEFAULT now(),
   updated_at     timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT charges_gross_chk CHECK (gross_minor = net_minor + tax_minor),          -- INV-7
-  CONSTRAINT charges_idempotency_key_uniq UNIQUE (idempotency_key)
+  CONSTRAINT charges_idempotency_key_uniq UNIQUE (idempotency_key),
+  CONSTRAINT charges_tax_legal_reason_chk                                            -- AC-33 (PR-S4)
+    CHECK (tax_treatment NOT IN ('EXEMPT', 'ZERO_RATED') OR tax_legal_reason IS NOT NULL)
 );
 CREATE INDEX charges_account_status_idx ON charges (account_id, status);            -- open-charge allocation (AC-19)
 CREATE INDEX charges_enrollment_id_idx ON charges (enrollment_id);
+CREATE INDEX charges_subscription_id_idx ON charges (subscription_id);              -- FK lookup (PR-S2)
+-- Time-driven 72h expiry sweep (AC-12): only in-flight charges (PR-S7).
+CREATE INDEX charges_expiry_sweep_idx ON charges (expires_at)
+  WHERE status IN ('PENDING', 'REQUIRES_ACTION');
 -- Single-runner-safe recurring billing: one charge per (subscription, period) (INFRA-3, NEW-DEBT-1).
 CREATE UNIQUE INDEX charges_subscription_period_uniq
   ON charges (subscription_id, billing_period)
@@ -167,6 +209,10 @@ ALTER TABLE payments
   ADD COLUMN payment_method_id uuid REFERENCES payment_methods (id),
   ADD COLUMN cit_mit           text CHECK (cit_mit IN ('CIT','MIT')),              -- DAT-8
   ADD COLUMN confirmed_at      timestamptz;                                        -- INV-3 (operator confirmation)
+-- Bring the pre-existing base column in line with the currency-generic shape check (PR-S8).
+ALTER TABLE payments
+  ADD CONSTRAINT payments_currency_len_chk CHECK (char_length(currency) = 3);
+CREATE INDEX payments_payment_method_id_idx ON payments (payment_method_id);       -- FK lookup (PR-S2)
 
 -- Parent-initiated push via hosted page (AC-47, FR-5). Recorded as a payment on confirmation.
 CREATE TABLE payment_intents (
@@ -185,8 +231,10 @@ CREATE TABLE payment_intents (
   CONSTRAINT payment_intents_idempotency_key_uniq UNIQUE (idempotency_key)
 );
 CREATE INDEX payment_intents_account_id_idx ON payment_intents (account_id);
+CREATE INDEX payment_intents_payment_id_idx ON payment_intents (payment_id);       -- FK lookup (PR-S2)
 
--- Inbound operator webhooks. Cross-pod at-most-once relies on this UNIQUE (INFRA-2, INV-2).
+-- Inbound operator webhooks (the transactional inbox, ADR-0003). Cross-pod at-most-once
+-- relies on the dedup UNIQUE (INFRA-2, INV-2); retry/backoff/DLQ live on the row (ADR-0003 §3).
 CREATE TABLE operator_events (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   operator          text NOT NULL,
@@ -194,16 +242,23 @@ CREATE TABLE operator_events (
   event_type        text,
   signature_verified boolean NOT NULL DEFAULT false,                 -- AC-14 (HMAC)
   payload           jsonb NOT NULL,
-  status            text NOT NULL DEFAULT 'RECEIVED'
-                    CHECK (status IN ('RECEIVED','APPLIED','DUPLICATE','REJECTED')),
+  status            text NOT NULL DEFAULT 'PENDING'
+                    CHECK (status IN ('PENDING','PROCESSED','FAILED','DEAD','DUPLICATE','REJECTED')),
+  attempts          integer NOT NULL DEFAULT 0,                      -- ADR-0003: retry count
+  next_attempt_at   timestamptz,                                     -- ADR-0003: backoff schedule
+  last_error        text,                                            -- ADR-0003: last failure detail
   payment_id        uuid REFERENCES payments (id),                  -- resulting payment, if any
   received_at       timestamptz NOT NULL DEFAULT now(),
   processed_at      timestamptz,
   CONSTRAINT operator_events_dedup_uniq UNIQUE (operator, operator_event_id)  -- INFRA-2 / AC-15 / INV-2
 );
-CREATE INDEX operator_events_status_idx ON operator_events (status);
+-- Serves the relay claim (status + due time, FOR UPDATE SKIP LOCKED) AND the
+-- DLQ-depth golden signal count(status='DEAD') (ADR-0003 open item / NFR-9) (PR-S1/PR-S7).
+CREATE INDEX operator_events_claim_idx ON operator_events (status, next_attempt_at);
+CREATE INDEX operator_events_payment_id_idx ON operator_events (payment_id);        -- FK lookup (PR-S2)
 
 -- Applying a payment across charges, oldest-first (AC-19); charges locked FOR UPDATE in-app (PR-008).
+-- NOTE (PR-S3): payment.currency == charge.currency is app-enforced (PLN-only, AC-8), not a DB FK for M1.
 CREATE TABLE payment_allocations (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   payment_id   uuid NOT NULL REFERENCES payments (id) ON DELETE RESTRICT,
@@ -217,12 +272,14 @@ CREATE INDEX payment_allocations_payment_id_idx ON payment_allocations (payment_
 -- ----------------------------------------------------------------------------
 -- 5. Corrections under maker/checker: refunds, adjustments (+ batches), disbursements
 --    (AC-10, AC-22, AC-23, AC-24, AC-25, AC-27, AC-28, PR-005, PR-006/INV-6)
+--    Link direction (PR-S5): the correction row points at the reversing ledger entry it
+--    produced (ledger_entry_id); the ledger row is never mutated (append-only, PR-S9).
 -- ----------------------------------------------------------------------------
 CREATE TABLE refunds (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   payment_id     uuid NOT NULL REFERENCES payments (id) ON DELETE RESTRICT,
   amount_minor   bigint NOT NULL CHECK (amount_minor > 0),
-  currency       text NOT NULL CHECK (char_length(currency) = 3),
+  currency       text NOT NULL CHECK (char_length(currency) = 3),    -- == payment.currency (app, PR-S3)
   reason         text NOT NULL,
   status         text NOT NULL DEFAULT 'PENDING_APPROVAL'
                  CHECK (status IN ('PENDING_APPROVAL','APPROVED','REJECTED','EXECUTED')),
@@ -257,7 +314,7 @@ CREATE TABLE adjustments (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id     uuid NOT NULL REFERENCES accounts (id) ON DELETE RESTRICT,
   amount_minor   bigint NOT NULL,                                    -- signed (ADJUSTMENT is ±)
-  currency       text NOT NULL CHECK (char_length(currency) = 3),
+  currency       text NOT NULL CHECK (char_length(currency) = 3),    -- == account.currency (app, PR-S3)
   reason         text NOT NULL,
   status         text NOT NULL DEFAULT 'PENDING_APPROVAL'
                  CHECK (status IN ('PENDING_APPROVAL','APPROVED','REJECTED','EXECUTED')),
@@ -285,13 +342,14 @@ CREATE TABLE adjustment_batch_entries (
   detail       text
 );
 CREATE INDEX adjustment_batch_entries_batch_id_idx ON adjustment_batch_entries (batch_id);
+CREATE INDEX adjustment_batch_entries_account_id_idx ON adjustment_batch_entries (account_id);  -- FK lookup (PR-S2)
 
 -- Manual bank-transfer payout of residual credit with no refundable capture (AC-22).
 CREATE TABLE disbursements (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id      uuid NOT NULL REFERENCES accounts (id) ON DELETE RESTRICT,
   amount_minor    bigint NOT NULL CHECK (amount_minor > 0),
-  currency        text NOT NULL CHECK (char_length(currency) = 3),
+  currency        text NOT NULL CHECK (char_length(currency) = 3),   -- == account.currency (app, PR-S3)
   bank_transfer_ref text NOT NULL,
   reason          text NOT NULL,
   status          text NOT NULL DEFAULT 'PENDING_APPROVAL'
@@ -342,9 +400,12 @@ CREATE TABLE invoice_lines (
   tax_treatment  text NOT NULL CHECK (tax_treatment IN ('STANDARD','REDUCED','ZERO_RATED','EXEMPT')),
   tax_legal_reason text,                                            -- shown for EXEMPT/ZERO_RATED (AC-33)
   tax_jurisdiction text NOT NULL,
-  CONSTRAINT invoice_lines_total_chk CHECK (gross_minor = net_minor + tax_minor)  -- INV-7
+  CONSTRAINT invoice_lines_total_chk CHECK (gross_minor = net_minor + tax_minor),  -- INV-7
+  CONSTRAINT invoice_lines_tax_legal_reason_chk                                    -- AC-33 (PR-S4)
+    CHECK (tax_treatment NOT IN ('EXEMPT', 'ZERO_RATED') OR tax_legal_reason IS NOT NULL)
 );
 CREATE INDEX invoice_lines_invoice_id_idx ON invoice_lines (invoice_id);
+CREATE INDEX invoice_lines_charge_id_idx ON invoice_lines (charge_id);             -- FK lookup (PR-S2)
 
 -- ----------------------------------------------------------------------------
 -- 7. Dunning (AC-16, AC-41, AC-42/FU-1/FU-2, AC-43) + overrides (AC-23)
@@ -360,6 +421,8 @@ CREATE TABLE dunning_state (
   next_action_at   timestamptz,
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
+-- Dunning-tick sweep: due accounts by next_action_at (PR-S7).
+CREATE INDEX dunning_state_next_action_idx ON dunning_state (next_action_at);
 
 -- One message per step per channel, sent within the 09:00-20:00 window (AC-42 / FU-1).
 CREATE TABLE dunning_notifications (
@@ -420,6 +483,7 @@ CREATE TABLE reconciliation_mismatches (
 );
 CREATE INDEX reconciliation_mismatches_status_idx ON reconciliation_mismatches (status);
 CREATE INDEX reconciliation_mismatches_account_id_idx ON reconciliation_mismatches (account_id);
+CREATE INDEX reconciliation_mismatches_payment_id_idx ON reconciliation_mismatches (payment_id);  -- FK lookup (PR-S2)
 
 -- ----------------------------------------------------------------------------
 -- 9. Audit log (NFR-8, AC-24) — immutable; records maker+checker+correlation id.
@@ -441,22 +505,58 @@ CREATE INDEX audit_log_entity_idx ON audit_log (entity_type, entity_id);
 CREATE INDEX audit_log_correlation_id_idx ON audit_log (correlation_id);
 
 -- ----------------------------------------------------------------------------
--- 10. Evolve ledger_entries with typed source links + correlation (kept append-only).
---     Deferred to the end so charges/refunds/adjustments already exist (circular FK).
+-- 10. Evolve ledger_entries with a typed link to the charge it realises + correlation.
+--     Kept append-only (INV-4). Deferred to the end so charges already exists.
+--     Correction links live on the correction row (PR-S5), not here — so a reversing
+--     entry is only ever INSERTed, never UPDATEd (keeps the append-only trigger below valid).
 -- ----------------------------------------------------------------------------
 ALTER TABLE ledger_entries
   ADD COLUMN charge_id      uuid REFERENCES charges (id),
-  ADD COLUMN refund_id      uuid REFERENCES refunds (id),
-  ADD COLUMN adjustment_id  uuid REFERENCES adjustments (id),
   ADD COLUMN correlation_id text;
 CREATE INDEX ledger_entries_charge_id_idx ON ledger_entries (charge_id);
+-- Bring pre-existing base currency columns in line with the shape check (PR-S8).
+ALTER TABLE ledger_entries
+  ADD CONSTRAINT ledger_entries_currency_len_chk CHECK (char_length(currency) = 3);
+ALTER TABLE account_balances
+  ADD CONSTRAINT account_balances_currency_len_chk CHECK (char_length(currency) = 3);
+
+-- ----------------------------------------------------------------------------
+-- 11. Triggers: updated_at maintenance (PR-S6) and append-only enforcement (PR-S9).
+-- ----------------------------------------------------------------------------
+CREATE TRIGGER accounts_set_updated_at BEFORE UPDATE ON accounts
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER account_billing_contacts_set_updated_at BEFORE UPDATE ON account_billing_contacts
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER subscriptions_set_updated_at BEFORE UPDATE ON subscriptions
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER charges_set_updated_at BEFORE UPDATE ON charges
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER payment_intents_set_updated_at BEFORE UPDATE ON payment_intents
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER dunning_state_set_updated_at BEFORE UPDATE ON dunning_state
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER ledger_entries_append_only BEFORE UPDATE OR DELETE ON ledger_entries
+  FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
+CREATE TRIGGER audit_log_append_only BEFORE UPDATE OR DELETE ON audit_log
+  FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
 
 -- Down Migration
 
+DROP TRIGGER IF EXISTS audit_log_append_only ON audit_log;
+DROP TRIGGER IF EXISTS ledger_entries_append_only ON ledger_entries;
+DROP TRIGGER IF EXISTS dunning_state_set_updated_at ON dunning_state;
+DROP TRIGGER IF EXISTS payment_intents_set_updated_at ON payment_intents;
+DROP TRIGGER IF EXISTS charges_set_updated_at ON charges;
+DROP TRIGGER IF EXISTS subscriptions_set_updated_at ON subscriptions;
+DROP TRIGGER IF EXISTS account_billing_contacts_set_updated_at ON account_billing_contacts;
+DROP TRIGGER IF EXISTS accounts_set_updated_at ON accounts;
+
+ALTER TABLE account_balances DROP CONSTRAINT IF EXISTS account_balances_currency_len_chk;
+ALTER TABLE ledger_entries
+  DROP CONSTRAINT IF EXISTS ledger_entries_currency_len_chk;
 ALTER TABLE ledger_entries
   DROP COLUMN IF EXISTS correlation_id,
-  DROP COLUMN IF EXISTS adjustment_id,
-  DROP COLUMN IF EXISTS refund_id,
   DROP COLUMN IF EXISTS charge_id;
 
 DROP TABLE IF EXISTS audit_log;
@@ -476,6 +576,7 @@ DROP TABLE IF EXISTS payment_allocations;
 DROP TABLE IF EXISTS operator_events;
 DROP TABLE IF EXISTS payment_intents;
 
+ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_currency_len_chk;
 ALTER TABLE payments
   DROP COLUMN IF EXISTS confirmed_at,
   DROP COLUMN IF EXISTS cit_mit,
@@ -496,3 +597,6 @@ ALTER TABLE accounts
   DROP COLUMN IF EXISTS deleted_at,
   DROP COLUMN IF EXISTS status,
   DROP COLUMN IF EXISTS currency;
+
+DROP FUNCTION IF EXISTS forbid_mutation();
+DROP FUNCTION IF EXISTS set_updated_at();
