@@ -1,7 +1,8 @@
 # Payments — Specification
 
 **Context:** payments · **Feature:** payments
-**Status:** transcribed from `decisions.yaml` (workshop-captured 2026-09-21 + peer-review dispositions)
+**Status:** transcribed from `decisions.yaml` (workshop-captured 2026-09-21 + peer-review dispositions
++ follow-up decisions 2026-09-22)
 **Sources (artefact tree):** `specs/payments/decisions.yaml`, `specs/payments/feature-inventory.yaml`,
 `specs/payments/glossary.md`, `specs/payments/assumption-register.yaml`, `specs/payments/CONSTRAINTS.md`
 **Artefact-tree ref:** `edugo-payments-service@01d2f7a` (in-repo artefact tree — no separate `*-specs` tree configured)
@@ -127,9 +128,9 @@ criterion resting on an assumption; `[blocked-by …]` marks a criterion whose e
   chargeback reversing entry.
 - **AC-27** (ABS-12) — Where a correction is applied in bulk, the payments service shall require senior approval and
   a completed mandatory dry-run, and shall log the outcome per entry.
-- **AC-28** (Q-4) `[blocked-by E-REFUND-THRESHOLD]` — Where a refund's amount is at or below the Finance-set
-  auto-approve threshold, the payments service shall permit it without a separate checker. *Threshold value not yet
-  set (Finance); criterion cannot be tested until the number is decided.*
+- **AC-28** (Q-4, FU-3) — Where a refund's amount is at or below 100 PLN (10000 minor units), the payments service
+  shall permit it without a separate checker; if a refund exceeds 100 PLN, then it shall require maker/checker per
+  AC-23. *(Threshold set by Finance 2026-09-22; retunable.)*
 
 ### 3.7 Tax
 
@@ -171,10 +172,13 @@ criterion resting on an assumption; `[blocked-by …]` marks a criterion whose e
 
 ### 3.10 Dunning & notifications
 
-- **AC-41** (Q-6, ABS-8) `[ASM-3]` — When a charge enters dunning, the payments service shall send retry/comms on
-  Warsaw business days at Day 0, +3, +7, and +10, and apply an access block at +14 if still unpaid.
-- **AC-42** (Q-6, ABS-8) — When a dunning step fires, the payments service shall send one message per step over
-  email and in-app channels, digesting multiple failed charges for the same parent into that single message.
+- **AC-41** (Q-6, ABS-8, FU-2) `[ASM-3]` — When a charge enters dunning, the payments service shall send
+  retry/comms on Warsaw business days at Day 0, +3, +7, and +10, and at +14 apply an access block accompanied by a
+  block-notice message if still unpaid.
+- **AC-42** (Q-6, ABS-8, FU-1, FU-2) — When a dunning step fires, the payments service shall send exactly one
+  message per step over email and in-app channels, digesting multiple failed charges for the same parent into that
+  single message, sending only within the 09:00–20:00 Europe/Warsaw window (holding to the next in-window time
+  otherwise), for a maximum of 5 messages per cycle (Day 0/+3/+7/+10 + the +14 block notice).
 - **AC-43** (Q-6, ABS-8) — When any payment succeeds for an account under dunning, the payments service shall
   immediately unblock access and clear the dunning state.
 - **AC-44** (Q-6, ABS-8) — When the three-way match finds a reconciliation mismatch, the payments service shall
@@ -242,15 +246,17 @@ Stated as what this iteration does **not** do. Each traces to a DEFERRED decisio
 
 ## 6. Open
 
-ESCALATED items still blocking parts of this spec. Nothing is silently dropped; the criteria they block are marked
-`[blocked-by …]` above.
+Items still open after the 2026-09-22 follow-up decisions (E-REFUND-THRESHOLD was closed — see below). Nothing is
+silently dropped; any criterion still awaiting detail is marked `[blocked-by …]` above.
 
-| ID | From | What | Owner | Blocks |
-|---|---|---|---|---|
-| **E-OPERATOR-CONTRACT** | Q-2 | Confirm PayU webhook guarantees, settlement format, refund/chargeback/mandate APIs | **TBD** (CTO left unassigned) | Live integration behind AC-14/AC-15; rests on ASM-1 until confirmed |
-| **E-REFUND-THRESHOLD** | Q-4 | Set the refund auto-approve amount threshold (PLN) | Finance (due date not set) | AC-28 |
-| **E-RETENTION-POLICY** | ABS-7 | Exact retention-vs-erasure policy for minors' data | DPO/Legal (due date not set) | Exact details of AC-40 |
-| **Q-3** | Q-3 | SALDEO/KSeF integration specifics | none assigned (deferred) | Real accounting integration (NG-3 holds meanwhile) |
+| ID | From | What | Owner | Status | Blocks |
+|---|---|---|---|---|---|
+| **E-OPERATOR-CONTRACT** | Q-2 | Confirm PayU webhook guarantees, settlement format, refund/chargeback/mandate APIs | **CTO** (assigned 2026-09-22) | Open — confirm before live integration | Live integration behind AC-14/AC-15; rests on ASM-1 until confirmed. Mocked for M1. |
+| **E-RETENTION-POLICY** | ABS-7 | Exact retention-vs-erasure policy for minors' data | DPO/Legal | **Deferred** 2026-09-22 (CTO) | Minor-specific detail of AC-40 only; the AC-40 high-level rule stands |
+| **Q-3** | Q-3 | SALDEO/KSeF integration specifics | **CTO** (assigned 2026-09-22) | Deferred / mock-only | Real accounting integration (NG-3 holds meanwhile) |
+
+**Closed 2026-09-22:** E-REFUND-THRESHOLD → refund auto-approve threshold set to **100 PLN** (Finance, FU-3);
+AC-28 is now testable.
 
 ---
 
@@ -262,30 +268,29 @@ ASSUMED items this spec rests on, each with its revisit trigger (from `assumptio
   dedup). *Underpins AC-14, AC-15.* Revisit when the real PayU contract is obtained / before first live integration.
 - **ASM-2** — A charge with no operator confirmation expires after 72h (`PENDING → EXPIRED`). *Underpins AC-12.*
   Revisit when ops confirms/observes real operator confirmation latencies.
-- **ASM-3** — Dunning intervals 0/+3/+7/+10 → access block +14, fatigue ceiling ~5 messages/cycle. *Underpins
-  AC-41, AC-42.* Revisit after M1 real collection data (arrears / collection-rate metrics).
+- **ASM-3** — Dunning intervals 0/+3/+7/+10 → access block +14. *Underpins AC-41, AC-42.* Only the **day-intervals**
+  remain assumed/tunable; the send-window (09:00–20:00 Europe/Warsaw) and the 5-messages-per-cycle ceiling were made
+  concrete 2026-09-22 (FU-1/FU-2). Revisit the intervals after M1 real collection data (arrears / collection-rate).
 - **ASM-4** — EduGo operates a central IdP issuing OIDC/JWT tokens with `sub`, `role`, and `acr`/MFA claims plus a
-  JWKS endpoint. *Underpins the RBAC/actor-identity basis of AC-23, AC-24, AC-48.* Revisit — confirm the IdP + claim
-  set with the platform team before implementing API auth (ADR-0004).
+  JWKS endpoint. *Underpins the RBAC/actor-identity basis of AC-23, AC-24, AC-48.* **Confirmed for this exercise**
+  2026-09-22 (FU-7); still re-verify with the platform team before a production auth rollout (ADR-0004).
 
 ---
 
-## 8. Underspecified — returned
+## 8. Underspecified — resolved 2026-09-22
 
-These DECIDED resolutions are **too vague to become testable criteria**. They are returned to gap-interrogation
-rather than sharpened here — picking a value would be deciding, and deciding is not this skill's job.
+Both returns from the first spec pass have since been decided (decisions.yaml `follow_up_decisions`); AC-42 now
+carries their concrete bounds.
 
-- **Dunning quiet-hours window (Q-6 / ABS-8).** The resolution says comms go out "daytime Warsaw" but fixes no
-  concrete window (start/end hour). "Daytime" admits no pass/fail test. *Needs an explicit send-window, e.g.
-  09:00–20:00 Europe/Warsaw.* AC-42 transcribes the channel and one-message-per-step rules, which are testable; the
-  quiet-hours bound is held back.
-- **Dunning fatigue ceiling "~5/cycle" (Q-6 / ASM-3).** The "~5" is approximate and its scope is ambiguous — is it
-  exactly the count of one-message-per-step sends (five: Day 0/+3/+7/+10 + the +14 block notice), or an independent
-  cap across all digested comms? If the former it is redundant with AC-42; if the latter it needs a precise integer.
-  *Needs confirmation of which reading and, if independent, an exact number.*
+- **Dunning send-window (Q-6 / ABS-8 → FU-1).** ✅ Resolved: comms send only within **09:00–20:00 Europe/Warsaw**;
+  outside it, sends hold to the next in-window time. Transcribed into AC-42.
+- **Dunning fatigue ceiling (Q-6 / ASM-3 → FU-2).** ✅ Resolved: the ceiling **is** the one-message-per-step count —
+  exactly 5 messages/cycle (Day 0/+3/+7/+10 + the +14 block notice), not an independent cap. Transcribed into
+  AC-41/AC-42.
 
-A smaller flag (not blocking): the glossary's "severity by drift amount" for reconciliation mismatches (AC-44)
+A smaller flag (still not blocking): the glossary's "severity by drift amount" for reconciliation mismatches (AC-44)
 carries no threshold bands; AC-44 transcribes only the routing and ≤24h detection, which are decided and testable.
+Left as-is pending real reconciliation data.
 
 ---
 
@@ -294,8 +299,12 @@ carries no threshold bands; AC-44 transcribes only the routing and ≤24h detect
 - **Coverage:** every DECIDED absence (ABS-1,2,4,5,6,7,8,9,10,12,13), every ANSWERED question (Q-1,4,5,6), the
   ESCALATED-but-behaviourally-decided Q-2, and every FIXED review disposition (PR-001,003,004,005,006,008,009,012,014)
   produced ≥1 criterion. Every DEFERRED item (ABS-3,11; Q-3; PR-007,010; OFF-2) appears as a non-goal.
-- **Glossary:** no vocabulary conflict remained open in `decisions.yaml` — the glossary already reflects the
-  workshop and all peer-review dispositions — so no glossary change was applied.
+- **Glossary:** no vocabulary conflict was open; the 2026-09-22 follow-ups added concrete values (not term
+  changes) to the **Refund** entry (100 PLN threshold, FU-3) and the **Dunning** entry (send-window + 5-message
+  ceiling, FU-1/FU-2).
+- **Follow-up decisions (2026-09-22):** FU-1/FU-2 closed the two underspecified returns (AC-41/AC-42); FU-3 closed
+  E-REFUND-THRESHOLD (AC-28 now testable); FU-4 deferred the minor-specific detail of AC-40; FU-5/FU-6 assigned the
+  CTO as owner of E-OPERATOR-CONTRACT and Q-3; FU-7 confirmed ASM-4 for this exercise.
 - **PR-013** (decisions.yaml commit correction) is documentation housekeeping and produced no criterion, as intended.
 - Gherkin scenarios exemplifying these criteria live in [`features/`](./features/), each tagged with the AC IDs it
   covers.

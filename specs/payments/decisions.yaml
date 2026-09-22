@@ -254,9 +254,13 @@ assumptions:
     revisit_when: "ops confirms/observes real operator confirmation latencies"
     source: ABS-2
   - id: ASM-3
-    statement: "Dunning intervals 0/+3/+7/+10 → block +14 and fatigue ceiling ~5/cycle."
-    capture_confidence: explicit   # schedule decided; intervals flagged tunable
-    revisit_when: "after M1 real collection data (arrears / collection-rate metrics)"
+    statement: >
+      Dunning intervals 0/+3/+7/+10 → block +14. Send-window and ceiling made concrete
+      2026-09-22 (FU-1/FU-2): comms only 09:00-20:00 Europe/Warsaw; exactly one message
+      per step (Day 0/+3/+7/+10 + the +14 block notice) = 5 messages/cycle max — the
+      "fatigue ceiling" is that per-step count, not an independent cap.
+    capture_confidence: explicit   # DAY-INTERVALS still the tunable part; window+ceiling now decided
+    revisit_when: "after M1 real collection data (arrears / collection-rate metrics) — the day-intervals only"
     source: [Q-6, ABS-8]
 
 # ---------------------------------------------------------------------------
@@ -266,18 +270,22 @@ escalations:
   - id: E-OPERATOR-CONTRACT
     from: Q-2
     what: "Confirm PayU webhook guarantees, settlement format, refund/chargeback/mandate APIs."
-    owner: "TBD (CTO left unassigned)"
+    owner: "CTO"                                        # assigned 2026-09-22 (was TBD); see FU-5
     due: "before live PayU integration (no date set)"
+    status: open
   - id: E-REFUND-THRESHOLD
     from: Q-4
     what: "Set the refund auto-approve amount threshold (PLN)."
     owner: "Finance"
-    due: "not set in session"
+    due: "resolved 2026-09-22"
+    status: RESOLVED                                    # value set 2026-09-22; see FU-3
+    resolution: "Auto-approve threshold = 100 PLN (10000 minor units). Refunds at or below skip the checker."
   - id: E-RETENTION-POLICY
     from: ABS-7
     what: "Exact retention-vs-erasure policy details for minors' data."
     owner: "DPO/Legal"
-    due: "not set in session"
+    due: "deferred 2026-09-22 (CTO)"
+    status: DEFERRED                                    # explicitly deferred 2026-09-22; see FU-4
 
 # ---------------------------------------------------------------------------
 # OFF-INVENTORY FINDINGS — feedback to prototype-harvest
@@ -301,13 +309,12 @@ off_inventory:
 # ---------------------------------------------------------------------------
 still_open:
   - ref: E-OPERATOR-CONTRACT
-    note: "Owner unassigned by explicit CTO choice; must be named before live integration."
-  - ref: E-REFUND-THRESHOLD
-    note: "Owner Finance; due date not set."
+    note: "Owner CTO (assigned 2026-09-22); must be confirmed before live integration. Mocked for M1."
   - ref: E-RETENTION-POLICY
-    note: "Owner DPO/Legal; due date not set."
+    note: "Owner DPO/Legal; explicitly DEFERRED 2026-09-22 (CTO). AC-40 high-level rule stands; minor-specific details deferred."
   - ref: Q-3
-    note: "Deferred with no owner — fine while mock-only; needs an owner before real accounting integration."
+    note: "Owner CTO (assigned 2026-09-22); still deferred/mock-only — fine until real accounting integration."
+# E-REFUND-THRESHOLD closed 2026-09-22 (100 PLN) — see follow_up_decisions FU-3.
 
 # ---------------------------------------------------------------------------
 # REVIEW DISPOSITIONS — CTO decisions on peer-review findings (2026-09-21)
@@ -363,3 +370,48 @@ review_dispositions:
   - ref: PR-014
     disposition: FIXED
     decision: "CONSTRAINTS INFRA-2 now requires an operator_events table with UNIQUE (operator, operator_event_id)."
+
+# ---------------------------------------------------------------------------
+# FOLLOW-UP DECISIONS — spec-writer returns + escalations closed by decision-maker
+# (2026-09-22). These resolve the two `underspecified` returns from spec-writing
+# and assign owners/values to open escalations. AC IDs reference spec.md.
+# ---------------------------------------------------------------------------
+follow_up_decisions:
+  - ref: FU-1
+    from: "spec-writer underspecified return (Q-6 / ABS-8)"
+    disposition: DECIDED
+    decision: "Dunning comms send-window = 09:00-20:00 Europe/Warsaw. Outside the window, sends hold to the next in-window time."
+    affects: [AC-42]
+  - ref: FU-2
+    from: "spec-writer underspecified return (Q-6 / ASM-3)"
+    disposition: DECIDED
+    decision: >
+      Fatigue ceiling is the five per-step sends: one message each at Day 0/+3/+7/+10 and the +14 block
+      notice = 5 messages/cycle max. It is NOT an independent cap across digests; it is the one-per-step
+      rule counted. The +14 block carries a block-notice message (so +14 is a send, not silent).
+    affects: [AC-41, AC-42]
+  - ref: FU-3
+    closes: E-REFUND-THRESHOLD
+    from: Q-4
+    disposition: DECIDED
+    decision: "Refund auto-approve threshold = 100 PLN (10000 minor units). A refund at or below skips the checker; above it requires maker/checker (AC-23). Finance may retune."
+    affects: [AC-28]
+  - ref: FU-4
+    concerns: E-RETENTION-POLICY
+    from: ABS-7
+    disposition: DEFERRED
+    decision: "Minor-specific retention-vs-erasure details deferred (CTO, 2026-09-22). The AC-40 high-level rule (5y retain, redact parent billing PII, soft-delete, block while open debt) stands; the minor-specific refinement is out of scope until DPO/Legal delivers it."
+    affects: [AC-40]
+  - ref: FU-5
+    closes: "E-OPERATOR-CONTRACT owner"
+    from: Q-2
+    disposition: DECIDED
+    decision: "CTO is the owner of E-OPERATOR-CONTRACT. Still to be confirmed before live PayU integration; operator remains mocked for M1 (ASM-1 in force)."
+  - ref: FU-6
+    concerns: Q-3
+    disposition: DECIDED
+    decision: "CTO is the owner of the SALDEO/KSeF accounting handoff. Still deferred/mock-only until real accounting integration."
+  - ref: FU-7
+    concerns: ASM-4
+    disposition: CONFIRMED
+    decision: "Central IdP + OIDC/JWT claim set (sub, role, acr/MFA, JWKS) confirmed for the purpose of this exercise. assumption-register ASM-4 status → confirmed-for-exercise; still re-verify with the platform team before a production auth rollout (ADR-0004)."

@@ -12,8 +12,16 @@ Feature: Dunning, recovery, and reconciliation mismatches
     Given a charge of 15000 minor units becomes FAILED on a Warsaw business day (Day 0)
     When dunning runs across the cycle
     Then one comms message is sent on Day 0, +3, +7, and +10
-    And access is blocked at +14 while the charge is still unpaid
+    And access is blocked at +14 with a block-notice message while the charge is still unpaid
+    And the cycle sends at most 5 messages
     And the messages are sent over email and in-app
+
+  @AC-42
+  Scenario: Dunning comms hold outside the send-window
+    Given a dunning step falls due at 21:30 Europe/Warsaw
+    When the step fires
+    Then the message is held until 09:00 Europe/Warsaw the next in-window time
+    And no message is sent between 20:00 and 09:00 Europe/Warsaw
 
   @AC-42
   Scenario: Multiple failed charges for one parent are digested into one message

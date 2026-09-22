@@ -21,16 +21,19 @@ assumptions:
 
   - id: ASM-3
     feature: payments
-    statement: "Dunning intervals 0/+3/+7/+10 → access block +14, fatigue ceiling ~5 messages/cycle."
-    revisit_when: "after M1 real collection data (arrears / collection-rate metrics, PRD §4)"
-    source: decisions.yaml#Q-6, decisions.yaml#ABS-8
+    statement: >
+      Dunning intervals 0/+3/+7/+10 → access block +14. Refined 2026-09-22 (FU-1/FU-2):
+      comms send-window 09:00-20:00 Europe/Warsaw; exactly one message per step
+      (incl. the +14 block notice) = 5 messages/cycle max (the ceiling IS the per-step count).
+    revisit_when: "after M1 real collection data (arrears / collection-rate metrics, PRD §4) — the DAY-INTERVALS only; window+ceiling now decided"
+    source: decisions.yaml#Q-6, decisions.yaml#ABS-8, decisions.yaml#FU-1, decisions.yaml#FU-2
     captured_at: 2026-09-21
-    status: open
+    status: open   # intervals remain the tunable/assumed part
 
   - id: ASM-4
     feature: payments
     statement: "EduGo operates a central IdP that issues OIDC/JWT access tokens carrying sub, role, and acr/MFA claims, and exposes a JWKS endpoint — the actor-identity source ADR-0004 depends on."
     revisit_when: "confirm the platform's IdP + claim set with the platform team BEFORE implementing API auth (ADR-0004)"
-    source: docs/adr/0004-api-auth.md
+    source: docs/adr/0004-api-auth.md, decisions.yaml#FU-7
     captured_at: 2026-09-21
-    status: open   # CTO did not have this information at decision time
+    status: confirmed-for-exercise   # confirmed 2026-09-22 (FU-7); still re-verify with platform team before production auth rollout

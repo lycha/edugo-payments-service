@@ -32,6 +32,17 @@ Feature: Refunds and maker/checker governance
     And "Marek" approves it
     Then the payments service rejects it because cumulative refunds would exceed the captured amount
 
+  @AC-28
+  Scenario Outline: The 100 PLN threshold decides whether a refund needs a checker
+    When "Ola" initiates a refund of <amount> minor units against "pay-1"
+    Then the refund <approval>
+
+    Examples:
+      | amount | approval                          |
+      | 9000   | is auto-approved without a checker |
+      | 10000  | is auto-approved without a checker |
+      | 10001  | requires a separate checker        |
+
   @AC-27
   Scenario: A bulk correction requires senior approval and a dry-run
     When a bulk correction across 40 accounts is prepared
