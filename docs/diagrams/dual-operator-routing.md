@@ -74,7 +74,7 @@ sequenceDiagram
         F-->>R: accepted → PENDING
     else ambiguous (timeout / 5xx)
         P-->>R: outcome unknown
-        Note over R,P: leave PENDING — never blind-retry (may double-charge); reconcile
+        Note over R,P: leave PENDING — never blind-retry (may double-charge), reconcile instead
     end
     R-->>HUB: charge routed · operator recorded on the charge
 ```

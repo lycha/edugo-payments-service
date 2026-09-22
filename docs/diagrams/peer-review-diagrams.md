@@ -103,6 +103,21 @@ High-quality, spec-faithful diagram set that will genuinely help a new engineer 
 
 ---
 
+## Render validation (mermaid-cli)
+
+Ran `mmdc` (mermaid-cli 11.17.0) over all six files as a rendering gate — this **supersedes** the
+by-inspection caveat above.
+
+- **Result: 6/6 files render (all 8 charts).**
+- **One real bug the eye-review missed:** the PR-D4 failover note used a semicolon
+  (`…(may double-charge); reconcile`). In a Mermaid `sequenceDiagram` `;` is a statement separator, so
+  the note split mid-line and the whole chart **failed to parse** — it would have rendered as an error
+  block on GitHub. Fixed (`;` → `,`); re-render clean.
+- **Lesson:** avoid `;` inside sequence-diagram note/label text (it's fine only in `classDef`/`style`
+  statements). Worth wiring `mmdc` into CI so this is caught automatically, not by luck.
+
+---
+
 ## ⏸️ Awaiting Human Sign-Off
 
 Review complete. Please confirm how to proceed:
