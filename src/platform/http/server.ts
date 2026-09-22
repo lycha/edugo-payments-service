@@ -14,7 +14,14 @@ function problem(status: number, title: string, detail: string) {
 }
 
 export async function buildServer(container: AwilixContainer<Cradle>): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true }); // Fastify bundles pino for structured logs.
+  const app = Fastify({
+    logger: true, // Fastify bundles pino for structured logs.
+    // The contract is OpenAPI 3.0, which carries keywords ajv's JSON-Schema strict
+    // mode rejects (`example`, `nullable`). Relax strict mode so glue can build the
+    // route validators; ignored keywords are annotations only (nullable fields here
+    // are response-side). Without this, boot throws FST_ERR_SCH_VALIDATION_BUILD.
+    ajv: { customOptions: { strict: false } },
+  });
 
   const service = {
     // Stubs first: every operationId in the contract resolves to a 501 by default,
