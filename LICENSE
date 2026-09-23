@@ -26,6 +26,16 @@ the Software outside it.
 To request permission, contact the Author. Absent a signed written agreement
 from the Author, no rights are granted, and all rights are expressly reserved.
 
+THIRD-PARTY COMPONENTS.
+
+The Software depends on third-party open-source frameworks and libraries that
+are NOT owned by the Author and are NOT covered by this license. Each such
+component remains subject to its own license (predominantly MIT and Apache-2.0)
+and its copyright holders' rights. Nothing in this license grants, restricts,
+modifies, or supersedes any right in those components; they are governed solely
+by their respective licenses. A non-exhaustive inventory of these components
+and their licenses is provided in THIRD-PARTY-NOTICES.md.
+
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
