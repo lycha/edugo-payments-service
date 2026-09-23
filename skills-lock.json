@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "database-schema-designer": {
+      "source": "softaworks/agent-toolkit",
+      "sourceType": "github",
+      "skillPath": "skills/database-schema-designer/SKILL.md",
+      "computedHash": "6a26ca15216bb4bfee66ebf813edcb1e31a8002f3f641f16f550df814b522217"
+    },
     "domain-driven-design": {
       "source": "wondelai/skills",
       "sourceType": "github",
@@ -24,6 +30,12 @@
       "sourceType": "github",
       "skillPath": "plugins/database-design/skills/postgresql-table-design/SKILL.md",
       "computedHash": "c87d5cac33fbddc757fbb4b38a0098cff7dcf79201d40ddff2af76ec2724c5a1"
+    },
+    "rest-api-design": {
+      "source": "aj-geddes/useful-ai-prompts",
+      "sourceType": "github",
+      "skillPath": "skills/rest-api-design/SKILL.md",
+      "computedHash": "e249c58df5d9d59407fc4de70b0d75bb336d917bbe0a75695d6ec8cf13cfaf35"
     },
     "typescript-expert": {
       "source": "sickn33/agentic-awesome-skills",
