@@ -6,6 +6,7 @@ import type { Cradle } from '../container';
 import { buildPaymentApi } from '../../payments/adapter/http/incoming/PaymentApiImpl';
 import { stubHandlers } from '#generated/payments/adapter/http/incoming/handler-stubs';
 import { AccountNotFoundError, DomainError } from '../../payments/domain/Errors';
+import { registerBearerAuth } from './security';
 
 const SPEC_PATH = path.resolve(process.cwd(), 'openapi/openapi.yaml');
 
@@ -34,6 +35,10 @@ export async function buildServer(container: AwilixContainer<Cradle>): Promise<F
     },
   };
 
+  // Enforce the contract's `security` (global `bearerAuth`) at onRequest — before
+  // schema validation — so unauthenticated calls get 401, not 400. See security.ts / ADR-0004.
+  registerBearerAuth(app);
+
   await app.register(openapiGlue, {
     specification: SPEC_PATH,
     service,
@@ -46,6 +51,11 @@ export async function buildServer(container: AwilixContainer<Cradle>): Promise<F
     }
     if (err instanceof DomainError) {
       return reply.code(422).type('application/problem+json').send(problem(422, 'Domain rule violated', err.message));
+    }
+    // fastify-openapi-glue throws a SecurityError (statusCode 401) when no security
+    // scheme authenticates the request; surface it as problem+json (ADR-0004).
+    if ((err as { statusCode?: number }).statusCode === 401) {
+      return reply.code(401).type('application/problem+json').send(problem(401, 'Unauthorized', (err as Error).message));
     }
     if ((err as { validation?: unknown }).validation) {
       return reply.code(400).type('application/problem+json').send(problem(400, 'Invalid request', (err as Error).message));

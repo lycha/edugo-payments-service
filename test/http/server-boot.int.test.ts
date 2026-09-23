@@ -33,11 +33,27 @@ describe('HTTP server boot (full contract)', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/v1/accounts/${randomUUID()}/balance`,
+      headers: { authorization: 'Bearer test-token' }, // past auth (ADR-0004) to reach the stub
     });
     expect(res.statusCode).toBe(501);
     expect(res.headers['content-type']).toContain('application/problem+json');
     const body = res.json();
     expect(body.status).toBe(501);
     expect(body.title).toBe('Not Implemented');
+  });
+
+  it('returns 401 for a protected route without a bearer token (ADR-0004)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/accounts/${randomUUID()}/balance`,
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.headers['content-type']).toContain('application/problem+json');
+    expect(res.json().title).toBe('Unauthorized');
+  });
+
+  it('leaves the public liveness probe open (no token)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/v1/health' });
+    expect(res.statusCode).toBe(200);
   });
 });
