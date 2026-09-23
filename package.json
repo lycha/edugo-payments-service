@@ -18,7 +18,7 @@
     "test:watch": "vitest",
     "codegen:openapi": "openapi-typescript openapi/openapi.yaml -o .generated/payments/adapter/http/incoming/openapi.ts && node scripts/gen-handler-stubs.mjs",
     "gen:stubs": "node scripts/gen-handler-stubs.mjs",
-    "codegen:db": "kysely-codegen --dialect postgres --url $DATABASE_URL --out-file .generated/platform/db/schema.ts",
+    "codegen:db": "node scripts/codegen-db.mjs",
     "codegen": "pnpm codegen:openapi && pnpm codegen:db",
     "db:migrate": "node-pg-migrate up -m db/migrations",
     "db:migrate:down": "node-pg-migrate down -m db/migrations",
