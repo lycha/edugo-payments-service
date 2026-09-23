@@ -32,3 +32,28 @@ export class DuplicateIdempotencyKeyError extends DomainError {
     super(`Idempotency key already used: ${key}`);
   }
 }
+
+/** Raised when a charge references an enrollment that does not exist (→ 404). */
+export class EnrollmentNotFoundError extends DomainError {
+  readonly code = 'ENROLLMENT_NOT_FOUND';
+  constructor(enrollmentId: string) {
+    super(`Enrollment ${enrollmentId} not found`);
+  }
+}
+
+/** Raised when a charge is looked up by an id that does not exist (→ 404). */
+export class ChargeNotFoundError extends DomainError {
+  readonly code = 'CHARGE_NOT_FOUND';
+  constructor(chargeId: string) {
+    super(`Charge ${chargeId} not found`);
+  }
+}
+
+/** Raised when a tax breakdown would violate INV-7 (`gross == net + tax`) or omit
+ *  a required legal reason for an EXEMPT/ZERO_RATED line (AC-33). */
+export class InvalidTaxBreakdownError extends DomainError {
+  readonly code = 'INVALID_TAX_BREAKDOWN';
+  constructor(net: bigint, tax: bigint, gross: bigint) {
+    super(`Invalid tax breakdown: gross ${gross} != net ${net} + tax ${tax}, or missing legal reason`);
+  }
+}

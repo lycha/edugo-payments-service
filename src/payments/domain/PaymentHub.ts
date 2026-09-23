@@ -34,7 +34,8 @@ export class PaymentHub {
   async recordPayment(cmd: RecordPaymentCommand): Promise<RecordPaymentResult> {
     const amount = Money.of(cmd.amountMinor, cmd.currency);
 
-    return this.deps.unitOfWork.withTransaction(async (repo) => {
+    return this.deps.unitOfWork.withTransaction(async (repos) => {
+      const repo = repos.payments;
       if (!(await repo.accountExists(cmd.accountId))) {
         throw new AccountNotFoundError(cmd.accountId);
       }
