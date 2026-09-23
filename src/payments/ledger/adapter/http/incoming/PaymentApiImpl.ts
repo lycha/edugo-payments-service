@@ -1,14 +1,15 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { AwilixContainer } from 'awilix';
-import type { Cradle } from '../../../../platform/container';
+import type { Cradle } from '../../../../../platform/container';
 import type { components } from '#generated/payments/adapter/http/incoming/openapi';
 import { PaymentMapper } from './PaymentMapper';
 
 type RecordPaymentBody = components['schemas']['RecordPaymentRequest'];
 
 /**
- * Incoming HTTP adapter. fastify-openapi-glue binds these methods to routes by
- * operationId; requests/responses are validated against the OpenAPI schemas.
+ * Incoming HTTP adapter for the payment-recording use case. fastify-openapi-glue
+ * binds these methods to routes by operationId; requests/responses are validated
+ * against the OpenAPI schemas.
  */
 export function buildPaymentApi(container: AwilixContainer<Cradle>) {
   return {

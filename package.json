@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#generated/*": "./.generated/*"
+    "#generated/*": "./.generated/*",
+    "#payments/*": "./src/payments/*"
   },
   "engines": {
     "node": ">=22"

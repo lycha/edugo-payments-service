@@ -1,13 +1,13 @@
 ---
 # edugo-payments-service-1t6l
 title: Add ChargeDao + ChargeRepository port + UnitOfWork bundle
-status: todo
+status: done
 type: task
 priority: high
 tags:
     - tier2
 created_at: 2026-09-23T12:05:12Z
-updated_at: 2026-09-23T12:20:18Z
+updated_at: 2026-09-23T14:39:22Z
 parent: edugo-payments-service-f4c4
 ---
 
@@ -20,10 +20,10 @@ Storage + transaction seam for charges, so charge writes join the same atomic un
 - ChargeStatus domain union (mirror LedgerEntryType).
 
 ## Acceptance Criteria
-- [ ] Given a NewCharge, when insertCharge runs then a row is written and { id } returned; duplicate idempotency key -> DuplicateIdempotencyKeyError (23505).
-- [ ] Given open charges, when findOpenChargesByAccount runs then they are returned oldest-first (created_at asc).
-- [ ] Given a running txn, when findOpenChargesByAccountForUpdate runs then the open charges are row-locked (FOR UPDATE) so a parallel payment cannot over-allocate (PR-008).
-- [ ] Given withTransaction, when it runs then payments and charges repos share the same transaction.
+- [x] Given a NewCharge, when insertCharge runs then a row is written and { id } returned; duplicate idempotency key -> DuplicateIdempotencyKeyError (23505).
+- [x] Given open charges, when findOpenChargesByAccount runs then they are returned oldest-first (created_at asc).
+- [x] Given a running txn, when findOpenChargesByAccountForUpdate runs then the open charges are row-locked (FOR UPDATE) so a parallel payment cannot over-allocate (PR-008).
+- [x] Given withTransaction, when it runs then payments and charges repos share the same transaction.
 
 ## Out of Scope
 - Tax-rate resolution; state transitions beyond a status setter.
@@ -32,4 +32,4 @@ Storage + transaction seam for charges, so charge writes join the same atomic un
 - charges table + set_updated_at trigger already in db/migrations (payments-core). Follow PaymentDao.
 
 ## Definition of Done
-- [ ] Reviewed; tests for insert/dedup/ordering/locking; registered in Cradle; pnpm typecheck green
+- [x] Reviewed; tests for insert/dedup/ordering/locking; registered in Cradle; pnpm typecheck green

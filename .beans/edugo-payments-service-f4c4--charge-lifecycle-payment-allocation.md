@@ -1,13 +1,13 @@
 ---
 # edugo-payments-service-f4c4
 title: Charge lifecycle & payment allocation
-status: todo
+status: done
 type: epic
 priority: high
 tags:
     - tier2
 created_at: 2026-09-23T12:05:12Z
-updated_at: 2026-09-23T12:20:18Z
+updated_at: 2026-09-23T14:39:22Z
 ---
 
 ## Goal
@@ -17,9 +17,9 @@ Model the charge lifecycle on the ledger and allocate payments oldest-first, so 
 Charges, allocations, and the charge state machine are specified (spec/schema/migrations) but unimplemented. This layers the receivable side onto the existing ledger/balance machinery.
 
 ## Success Metrics
-- [ ] Creating a charge posts a CHARGE ledger entry (gross, negative) with balance == SUM(ledger) (INV-1/INV-7)
-- [ ] A payment allocates to open charges oldest-first; over-allocation becomes credit (INV-5)
-- [ ] A fully-covered charge transitions PENDING -> SETTLED (AC-11/AC-19)
+- [x] Creating a charge posts a CHARGE ledger entry (gross, negative) with balance == SUM(ledger) (INV-1/INV-7)
+- [x] A payment allocates to open charges oldest-first; over-allocation becomes credit (INV-5)
+- [x] A fully-covered charge transitions PENDING -> SETTLED (AC-11/AC-19)
 
 ## Scope
 ### In Scope
@@ -40,5 +40,5 @@ Charges, allocations, and the charge state machine are specified (spec/schema/mi
 - Concurrent allocation over-allocates — Mitigation: lock open charges FOR UPDATE (PR-008).
 
 ## Definition of Done
-- [ ] All child tasks completed and accepted
-- [ ] pnpm typecheck + pnpm test green; INV-1/5/7 asserted
+- [x] All child tasks completed and accepted
+- [x] pnpm typecheck + pnpm test green; INV-1/5/7 asserted
