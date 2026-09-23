@@ -65,3 +65,28 @@ export class InvalidTaxBreakdownError extends DomainError {
     super(`Invalid tax breakdown: gross ${gross} != net ${net} + tax ${tax}, or missing legal reason`);
   }
 }
+
+/** Raised when an operator webhook targets an operator with no registered adapter (→ 400). */
+export class UnknownOperatorError extends DomainError {
+  readonly code = 'UNKNOWN_OPERATOR';
+  constructor(operator: string) {
+    super(`No adapter registered for operator: ${operator}`);
+  }
+}
+
+/** Raised when an operator payload cannot be parsed (e.g. a non-string money amount) — permanent. */
+export class MalformedOperatorEventError extends DomainError {
+  readonly code = 'MALFORMED_OPERATOR_EVENT';
+  constructor(detail: string) {
+    super(`Malformed operator event: ${detail}`);
+  }
+}
+
+/** Raised when a parsed operator event cannot be resolved to a known account (INV-3) — permanent.
+ *  The relay dead-letters the inbox row instead of guessing an account. */
+export class UnresolvableOperatorEventError extends DomainError {
+  readonly code = 'UNRESOLVABLE_OPERATOR_EVENT';
+  constructor(detail: string) {
+    super(`Unresolvable operator event: ${detail}`);
+  }
+}

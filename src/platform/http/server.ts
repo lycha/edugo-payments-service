@@ -5,6 +5,7 @@ import type { AwilixContainer } from 'awilix';
 import type { Cradle } from '../container';
 import { buildPaymentApi } from '../../payments/ledger/adapter/http/incoming/PaymentApiImpl';
 import { buildChargeApi } from '../../payments/charges/adapter/http/incoming/ChargeApiImpl';
+import { buildOperatorEventApi } from '../../payments/ledger/adapter/http/incoming/OperatorEventApiImpl';
 import { stubHandlers } from '#generated/payments/adapter/http/incoming/handler-stubs';
 import {
   AccountNotFoundError,
@@ -38,10 +39,31 @@ export async function buildServer(container: AwilixContainer<Cradle>): Promise<F
     ...stubHandlers,
     ...buildPaymentApi(container),
     ...buildChargeApi(container),
+    ...buildOperatorEventApi(container),
     async healthCheck(_request: FastifyRequest, reply: FastifyReply): Promise<void> {
       await reply.code(200).send({ status: 'ok' });
     },
   };
+
+  // Capture the raw request body alongside the parsed JSON. The operator webhook
+  // verifies an HMAC over the exact received bytes (never a re-serialized body), so
+  // the handler reads `request.rawBody`. Parses JSON identically to the default for
+  // every other route. Must be registered before the glue plugin so its routes (in a
+  // child encapsulation context) inherit the parser.
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (req: FastifyRequest & { rawBody?: string }, body: string, done) => {
+      req.rawBody = body;
+      if (body === '' || body == null) return done(null, undefined);
+      try {
+        done(null, JSON.parse(body));
+      } catch (err) {
+        (err as { statusCode?: number }).statusCode = 400;
+        done(err as Error, undefined);
+      }
+    },
+  );
 
   // Enforce the contract's `security` (global `bearerAuth`) at onRequest — before
   // schema validation — so unauthenticated calls get 401, not 400. See security.ts / ADR-0004.

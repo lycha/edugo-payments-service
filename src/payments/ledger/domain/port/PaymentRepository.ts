@@ -9,6 +9,18 @@ import type { LedgerEntryType } from '../model/LedgerEntryType';
 export interface PaymentRepository {
   accountExists(accountId: string): Promise<boolean>;
 
+  /**
+   * Resolve a payment_intent (the operator correlation anchor) to its account,
+   * expected amount, and status. Returns null when the intent id is unknown — the
+   * relay then dead-letters the event rather than crediting a guessed account (INV-3).
+   */
+  findAccountByPaymentIntent(
+    intentId: string,
+  ): Promise<{ accountId: string; amountMinor: bigint; currency: string; status: string } | null>;
+
+  /** Mark an intent CONFIRMED and link its payment, in the apply transaction. */
+  confirmPaymentIntent(intentId: string, paymentId: string): Promise<void>;
+
   findPaymentByIdempotencyKey(key: string): Promise<{ id: string; accountId: string } | null>;
 
   insertPayment(input: {

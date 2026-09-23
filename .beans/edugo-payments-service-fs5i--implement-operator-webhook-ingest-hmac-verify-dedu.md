@@ -34,5 +34,10 @@ Inbound operator webhooks must be verified and durably queued with a fast ACK �
 ## Dependencies
 - Blocked by the operator abstraction + operator_events DAO.
 
+## Resolved decisions (tech spec, 2026-09-23)
+- Handler `receiveOperatorEvent` (POST /operator-events/{operator}): pick adapter from the `paymentOperators` registry by path param (unknown → `400`); read the raw body (captured by a JSON content-type parser that stashes `request.rawBody`) and `verifySignature` → invalid → `401`, nothing inserted (AC-14); else `insertReceived` (dedup) and ACK per contract: **`202`** new / **`200`** duplicate.
+- Dedup key `operator_event_id` = the DTO's top-level `operatorEventId`; the operator-specific object is stored in the `payload` jsonb column, `event_type` = DTO `type`.
+- No business logic / no ledger write in the request (that's the relay).
+
 ## Definition of Done
 - [ ] Integration test: valid→200+row; invalid→rejected; duplicate→one row; pnpm typecheck + tests green

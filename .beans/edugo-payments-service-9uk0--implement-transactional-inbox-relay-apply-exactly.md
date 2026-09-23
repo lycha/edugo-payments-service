@@ -37,5 +37,12 @@ The relay is where money is actually recorded — exactly once — from queued e
 ## Dependencies
 - Blocked by the operator abstraction + operator_events DAO.
 
+## Resolved decisions (tech spec, 2026-09-23)
+- `InboxRelay.runInboxRelayOnce()` loops: per iteration one `UnitOfWork` txn claims one due row (`claimDueOne`), selects the operator by `row.operator`, `parse`s the payload; if `status !== COMPLETED` → `markProcessed` (ack, no ledger effect); else resolve account via `findAccountByPaymentIntent(extOrderId)`.
+- Record path reuses a shared **`recordAndAllocate(repos, ...)`** core (extracted from `PaymentHub.recordPayment`) so payment + PAYMENT entry + balance + oldest-first allocation are idempotent (find-or-create on `payments.idempotency_key`).
+- **Failure transactions:** clean unresolvable / unknown-operator / parse error → mark DEAD in the *same* txn (nothing to roll back); an exception mid-apply → apply txn rolls back, failure recorded in a **separate** txn (mirrors `recordPayment`'s post-rollback `DuplicateIdempotencyKeyError` handling). Transient exceptions retry (`attempts++`, backoff) up to MAX(=5) then DEAD.
+- `recordPayment` (POST /payments) is retained as the manual/back-office path; both share `payments.idempotency_key`.
+- Returns `{ processed, failed, dead }` for tests/observability. CronJob wiring out of scope.
+
 ## Definition of Done
 - [ ] Integration tests: apply-once, replay no-op, unresolvable -> DEAD, failure rollback; pnpm typecheck + tests green

@@ -38,6 +38,15 @@ ADR-0003 chose a transactional inbox + CronJob relay (Postgres + K8s, no bus). T
 - Duplicate/crash mid-apply — Mitigation: apply + mark-processed in ONE txn; UNIQUE(operator,event_id) dedup.
 - Event cannot be mapped to an account — Mitigation: normalise resolves account or the row goes DEAD; never a wrong-account credit (INV-3, PR-T1).
 
+## Resolved decisions (tech spec, 2026-09-23)
+See `docs/tech-spec-exactly-once-operator-ingestion.md` + peer review.
+- Account correlation uses PayU's echoed `extOrderId` (= our `payment_intent` id) — **no migration**. Store PayU `orderId` in `payments.operator_reference`.
+- PayU has no per-delivery event id → dedup on `(orderId, status)`; `operator_event_id = "${orderId}:${status}"`; payment `idempotency_key = "payu:${orderId}:COMPLETED"` (operator-qualified). Only `COMPLETED` records money.
+- Failure bookkeeping runs in a **separate** transaction from the (rolled-back) apply; unresolvable/parse/unknown-operator → DEAD (permanent), transient throw → retry-then-DEAD.
+- Money crosses the jsonb boundary as string → `BigInt` (never a JS number).
+- Ingest ACK follows the contract: `202` accepted / `200` duplicate. Unknown operator → `400`.
+- `recordPayment` retained as the manual/back-office path (reserved `"manual:"` key prefix); operator confirmations flow only through the relay.
+
 ## Definition of Done
 - [ ] All child tasks completed and accepted
 - [ ] pnpm typecheck + pnpm test green; invariant tests included
