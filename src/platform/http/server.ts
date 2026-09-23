@@ -47,6 +47,20 @@ export async function buildServer(container: AwilixContainer<Cradle>): Promise<F
   // schema validation — so unauthenticated calls get 401, not 400. See security.ts / ADR-0004.
   registerBearerAuth(app);
 
+  // Treat empty-string query parameters as absent. Clients (HTML forms, some HTTP
+  // callers) send `?status=&cursor=` for "no filter", but an empty value fails ajv
+  // enum/format validation with a 400. Runs in preValidation (before schema
+  // validation) and must be registered before the glue plugin so its routes — in a
+  // child encapsulation context — inherit the hook (same reason as setErrorHandler).
+  app.addHook('preValidation', async (request) => {
+    const query = request.query as Record<string, unknown> | null;
+    if (query && typeof query === 'object') {
+      for (const key of Object.keys(query)) {
+        if (query[key] === '') delete query[key];
+      }
+    }
+  });
+
   // Register the error handler BEFORE the glue plugin. fastify-openapi-glue mounts
   // the routes in a child encapsulation context, which snapshots the parent's error
   // handler at creation time — so a handler set *after* registration is not inherited

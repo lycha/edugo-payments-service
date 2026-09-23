@@ -1,22 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Kysely } from 'kysely';
+import type { FastifyInstance } from 'fastify';
 import { startTestDatabase, type TestDatabase } from '../setup/postgres';
 import { createDb } from '../../src/platform/db/database';
 import { buildContainer } from '../../src/platform/container';
+import { buildServer } from '../../src/platform/http/server';
 import type { DB } from '#generated/platform/db/schema';
 
 let testDb: TestDatabase;
 let db: Kysely<DB>;
 let container: ReturnType<typeof buildContainer>;
+let app: FastifyInstance;
 
 beforeAll(async () => {
   testDb = await startTestDatabase();
   db = createDb(testDb.connectionString);
   container = buildContainer(db);
+  app = await buildServer(container);
+  await app.ready();
 });
 
 afterAll(async () => {
+  await app?.close();
   await db?.destroy();
   await testDb?.container.stop();
 });
@@ -166,6 +172,35 @@ describe('PaymentHub.createCharge', () => {
     }
     // Exactly the three charges, oldest-first, each once (proves the ms-precision keyset).
     expect(seen).toEqual(ids);
+  });
+
+  it('listCharges HTTP: empty status/cursor query params are treated as absent (fetch all)', async () => {
+    const { accountId, enrollmentId } = await seedEnrollment();
+    const hub = container.resolve('paymentHub');
+    await hub.createCharge({ enrollmentId, netMinor: 10_000n, currency: 'PLN', idempotencyKey: randomUUID() });
+    await hub.createCharge({ enrollmentId, netMinor: 20_000n, currency: 'PLN', idempotencyKey: randomUUID() });
+
+    // A browser/form sends `?status=&cursor=` for "no filter" — must not 400.
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/accounts/${accountId}/charges?limit=10&cursor=&status=`,
+      headers: { authorization: 'Bearer test-token' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.items).toHaveLength(2); // all charges, regardless of status
+    expect(body.nextCursor).toBeNull();
+  });
+
+  it('listCharges HTTP: an invalid status value still 400s (enum enforced)', async () => {
+    const { accountId } = await seedEnrollment();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/accounts/${accountId}/charges?status=BOGUS`,
+      headers: { authorization: 'Bearer test-token' },
+    });
+    expect(res.statusCode).toBe(400);
   });
 
   it('rejects a malformed pagination cursor (InvalidCursorError → 400)', async () => {
