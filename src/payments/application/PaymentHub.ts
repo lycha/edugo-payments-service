@@ -4,6 +4,7 @@ import { encodeChargeCursor } from '#payments/charges/domain/model/ChargeCursor'
 import {
   AccountNotFoundError,
   ChargeNotFoundError,
+  CurrencyMismatchError,
   DuplicateIdempotencyKeyError,
   EnrollmentNotFoundError,
 } from '#payments/ledger/domain/Errors';
@@ -97,6 +98,12 @@ export class PaymentHub {
 
       const balance = await repo.incrementBalance(cmd.accountId, amount);
 
+      // Ledger-neutral allocation (INV-5, FR-9): pay down open charges oldest-first
+      // in the SAME transaction. This writes payment_allocations rows and flips
+      // charge status only — it posts NO ledger entry and does not touch the
+      // balance (that was already moved by the CHARGE(−) and PAYMENT(+) entries).
+      await this.allocate(repos.charges, cmd.accountId, payment.id, amount);
+
       return {
         paymentId: payment.id,
         accountId: cmd.accountId,
@@ -105,6 +112,46 @@ export class PaymentHub {
         replayed: false,
       };
     });
+  }
+
+  /**
+   * Allocates a payment across the account's open charges oldest-first. The
+   * charges are locked `FOR UPDATE` (AC-20, PR-008) so concurrent payments cannot
+   * over-allocate. A fully-covered charge transitions PENDING → SETTLED (AC-11).
+   * Any remainder is left as positive balance (credit, INV-5) — no entry is
+   * posted. Ledger-neutral: does not modify the balance.
+   */
+  private async allocate(
+    charges: ChargeRepository,
+    accountId: string,
+    paymentId: string,
+    payment: Money,
+  ): Promise<void> {
+    const openCharges = await charges.findOpenChargesByAccountForUpdate(accountId);
+    let remaining = payment.amountMinor;
+
+    for (const charge of openCharges) {
+      if (remaining <= 0n) break;
+      // App-enforced currency match (PR-S3); cannot occur under PLN-only M1.
+      if (charge.currency !== payment.currency) {
+        throw new CurrencyMismatchError(payment.currency, charge.currency);
+      }
+
+      const settled = await charges.sumAllocationsForCharge(charge.id);
+      const outstanding = charge.grossMinor - settled;
+      if (outstanding <= 0n) continue; // defensive: already covered
+
+      const applied = remaining < outstanding ? remaining : outstanding;
+      await charges.insertAllocation({
+        paymentId,
+        chargeId: charge.id,
+        amount: Money.of(applied, payment.currency),
+      });
+      if (applied >= outstanding) {
+        await charges.updateStatus(charge.id, 'SETTLED');
+      }
+      remaining -= applied;
+    }
   }
 
   /**
