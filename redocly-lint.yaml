@@ -1,0 +1,16 @@
+# Redocly lint config for `pnpm lint:openapi`.
+#
+# Deliberately NOT named `redocly.yaml`: openapi-typescript auto-discovers a root
+# `redocly.yaml` and would apply this ruleset during `codegen:openapi`, escalating the
+# pre-existing OpenAPI-3.0 nullable-$ref idiom (allOf + `nullable: true`) to a hard
+# error and breaking codegen. Naming it `redocly-lint.yaml` + `--config` keeps the two
+# tools independent.
+#
+# The two rules below are the point of this gate — they FAIL if any `example`/`examples`
+# value doesn't conform to its schema (glue/ajv don't validate examples at runtime, and
+# money is integer minor units, so a stray string or bad shape drifts silently).
+extends:
+  - minimal
+rules:
+  no-invalid-media-type-examples: error
+  no-invalid-schema-examples: error

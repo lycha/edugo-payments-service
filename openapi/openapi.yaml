@@ -87,17 +87,35 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/OnboardAccountRequest'
+            examples:
+              parentWithTaxId:
+                summary: Parent with billing contact and tax id
+                value:
+                  currency: PLN
+                  externalRef: crm-8842
+                  billingContact:
+                    name: Anna Kowalska
+                    email: anna.kowalska@example.com
+                    taxId: PL1234567890
+                    addressLine: ul. Marszałkowska 1
+                    postalCode: 00-001
+                    city: Warszawa
+                    countryCode: PL
       responses:
         '201':
           description: Account onboarded with a zero balance
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Account' }
+              examples:
+                onboarded: { $ref: '#/components/examples/AccountZeroBalance' }
         '200':
           description: Idempotent replay — account already onboarded
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Account' }
+              examples:
+                replay: { $ref: '#/components/examples/AccountZeroBalance' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
@@ -116,6 +134,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Account' }
+              examples:
+                account: { $ref: '#/components/examples/AccountZeroBalance' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -136,6 +156,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Balance' }
+              examples:
+                arrears: { $ref: '#/components/examples/BalanceArrears' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -352,17 +374,28 @@ paths:
                 enrollmentId: { type: string, format: uuid }
                 netMinor: { $ref: '#/components/schemas/MoneyMinorPositive' }
                 currency: { $ref: '#/components/schemas/Currency' }
+            examples:
+              plTuition:
+                summary: PL tuition charge (net = gross; VAT-exempt)
+                value:
+                  enrollmentId: 7b8c9d00-2222-4e33-9c44-55d66e77f880
+                  netMinor: 149900
+                  currency: PLN
       responses:
         '201':
           description: Charge created
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Charge' }
+              examples:
+                created: { $ref: '#/components/examples/ChargePending' }
         '200':
           description: Idempotent replay — charge already created
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Charge' }
+              examples:
+                replay: { $ref: '#/components/examples/ChargePending' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
@@ -384,6 +417,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Charge' }
+              examples:
+                charge: { $ref: '#/components/examples/ChargePending' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -439,6 +474,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RecordPaymentRequest'
+            examples:
+              pullSettlement:
+                summary: Record a settled pull payment
+                value:
+                  accountId: 3f1a2b4c-5d6e-4f70-8a91-2b3c4d5e6f70
+                  amountMinor: 149900
+                  currency: PLN
+                  operatorReference: payu-tx-abc123
       responses:
         '201':
           description: Payment recorded
@@ -446,24 +489,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaymentRecorded'
+              examples:
+                recorded: { $ref: '#/components/examples/PaymentRecordedNew' }
         '200':
           description: Idempotent replay — payment already recorded
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaymentRecorded'
+              examples:
+                replay: { $ref: '#/components/examples/PaymentRecordedReplay' }
         '404':
           description: Account not found
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+              example: { type: 'about:blank', title: Account not found, status: 404, detail: 'No account for id 3f1a2b4c-5d6e-4f70-8a91-2b3c4d5e6f70' }
         '422':
           description: Domain rule violation
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+              example: { type: 'about:blank', title: Domain rule violated, status: 422, detail: 'Currency mismatch: account is PLN' }
 
   /payment-intents:
     post:
@@ -524,6 +573,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Payment' }
+              examples:
+                payment: { $ref: '#/components/examples/PaymentSettled' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -1091,32 +1142,107 @@ components:
       description: Opaque cursor from a previous page's nextCursor.
       schema: { type: string }
 
+  # Reusable payload examples (money is integer minor units — grosze — never strings here).
+  examples:
+    AccountZeroBalance:
+      summary: Freshly onboarded parent — zero balance from t=0 (INV-1)
+      value:
+        id: 3f1a2b4c-5d6e-4f70-8a91-2b3c4d5e6f70
+        externalRef: crm-8842
+        currency: PLN
+        balanceMinor: 0
+        billingContact:
+          name: Anna Kowalska
+          email: anna.kowalska@example.com
+          taxId: PL1234567890
+          city: Warszawa
+          countryCode: PL
+        createdAt: '2026-09-23T09:00:00Z'
+    BalanceArrears:
+      summary: Parent in arrears (negative = owed; AC-3 sign convention)
+      value:
+        accountId: 3f1a2b4c-5d6e-4f70-8a91-2b3c4d5e6f70
+        balanceMinor: -149900
+        currency: PLN
+        updatedAt: '2026-09-23T09:05:00Z'
+    ChargePending:
+      summary: Pending PL tuition charge (VAT-exempt, so tax is zero; INV-7)
+      value:
+        id: 9c2e1f00-1111-4a22-8b33-44c55d66e770
+        accountId: 3f1a2b4c-5d6e-4f70-8a91-2b3c4d5e6f70
+        enrollmentId: 7b8c9d00-2222-4e33-9c44-55d66e77f880
+        studentId: stu-10293
+        status: PENDING
+        currency: PLN
+        tax:
+          netMinor: 149900
+          taxMinor: 0
+          grossMinor: 149900
+          taxRate: 0
+          taxTreatment: EXEMPT
+          taxLegalReason: art. 43 ust. 1 pkt 26 ustawy o VAT
+          taxJurisdiction: PL
+        amountOwedMinor: -149900
+        createdAt: '2026-09-23T09:05:00Z'
+    PaymentRecordedNew:
+      summary: First record (201) — arrears cleared to zero
+      value:
+        paymentId: a1b2c3d4-3333-4f55-9a66-77b88c99d0e1
+        accountId: 3f1a2b4c-5d6e-4f70-8a91-2b3c4d5e6f70
+        balanceMinor: 0
+        currency: PLN
+        replayed: false
+    PaymentRecordedReplay:
+      summary: Idempotent replay (200) — identical result, no second entry
+      value:
+        paymentId: a1b2c3d4-3333-4f55-9a66-77b88c99d0e1
+        accountId: 3f1a2b4c-5d6e-4f70-8a91-2b3c4d5e6f70
+        balanceMinor: 0
+        currency: PLN
+        replayed: true
+    PaymentSettled:
+      summary: A settled pull payment
+      value:
+        id: a1b2c3d4-3333-4f55-9a66-77b88c99d0e1
+        accountId: 3f1a2b4c-5d6e-4f70-8a91-2b3c4d5e6f70
+        amountMinor: 149900
+        currency: PLN
+        direction: PULL
+        status: SETTLED
+        operatorReference: payu-tx-abc123
+        createdAt: '2026-09-23T09:06:00Z'
+
   responses:
     BadRequest:
       description: Malformed request (schema validation, ajv → 400)
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'about:blank', title: Invalid request, status: 400, detail: "headers must have required property 'idempotency-key'" }
     Unauthorized:
       description: Missing or invalid credentials
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'about:blank', title: Unauthorized, status: 401, detail: Missing or malformed bearer token }
     Forbidden:
       description: Authenticated but not permitted for this resource (RBAC, AC-48)
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'about:blank', title: Forbidden, status: 403, detail: A parent may act only on their own account }
     NotFound:
       description: Resource not found
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'about:blank', title: Account not found, status: 404, detail: 'No account for id 3f1a2b4c-5d6e-4f70-8a91-2b3c4d5e6f70' }
     UnprocessableEntity:
       description: Domain rule violation
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'about:blank', title: Domain rule violated, status: 422, detail: 'Currency mismatch: account is PLN' }
 
   schemas:
     # --- Shared value types --------------------------------------------------
