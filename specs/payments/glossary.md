@@ -152,7 +152,7 @@ Our **own** canonical states (not operator vocabulary): `PENDING → REQUIRES_AC
 ## Operations (corrections)
 
 ### Refund / Partial refund
-Return of a settled payment, in full or part, as a **reversing** ledger entry (FR-10, INV-4). Requires **maker/checker** and an **idempotency key** (PR-005); auto-approve threshold is a Finance policy number (escalated). Bounded by INV-6 — cumulative refunds never exceed the captured amount.
+Return of a settled payment, in full or part, as a **reversing** ledger entry (FR-10, INV-4). Requires **maker/checker** and an **idempotency key** (PR-005). **Auto-approve threshold = 100 PLN (10000 minor units)** — a refund at or below skips the checker; above it needs maker/checker (Finance may retune; decisions.yaml#FU-3). Bounded by INV-6 — cumulative refunds never exceed the captured amount.
 → maps to: `REFUND`, `PARTIAL_REFUND` entry types.
 
 ### Chargeback
@@ -177,7 +177,7 @@ Operator's transaction fee, recorded as a **separate** entry during reconciliati
 ## Dunning
 
 ### Dunning
-The automated failed/overdue collection flow (FR-13, A8): retries + comms on a schedule (Day 0 / +3 / +7 / +10 final notice → **+14 access block**; intervals ASM-3, tunable). Comms are **email + in-app**, one message per step, digested across multiple failed charges, daytime Warsaw. Entered on `FAILED`/`DECLINED` (not `EXPIRED`).
+The automated failed/overdue collection flow (FR-13, A8): retries + comms on a schedule (Day 0 / +3 / +7 / +10 final notice → **+14 access block**; intervals ASM-3, tunable). Comms are **email + in-app**, **one message per step**, digested across multiple failed charges. **Send-window 09:00–20:00 Europe/Warsaw** (FU-1); outside it, sends hold to the next in-window time. The **+14 block carries a block-notice message**, so a cycle is exactly **5 messages** (Day 0/+3/+7/+10 + the +14 notice) — the "fatigue ceiling" is that per-step count, not a separate cap (FU-2). Entered on `FAILED`/`DECLINED` (not `EXPIRED`).
 
 ### Access block
 Suspension of service access when dunning exhausts without payment (`DUN-BLOCKED`).

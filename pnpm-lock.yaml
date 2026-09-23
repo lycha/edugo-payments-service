@@ -36,6 +36,9 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
+      '@redocly/cli':
+        specifier: ^2.54.2
+        version: 2.54.2
       '@testcontainers/postgresql':
         specifier: ^10.13.2
         version: 10.28.0
@@ -923,6 +926,11 @@ packages:
 
   '@redocly/ajv@8.11.2':
     resolution: {integrity: sha512-io1JpnwtIcvojV7QKDUSIuMN/ikdOUd1ReEnUnMKGfDVridQZ31J0MmIuqwuRjWDZfmvr+Q0MqCcfHM2gTivOg==}
+
+  '@redocly/cli@2.54.2':
+    resolution: {integrity: sha512-YQ53kSQV/zpYSdY3WiQvf7JxuVLD8jTEX37YOY6MS+G3tyHDCeONpUkAt6qr9n2/nmGm6m+A+PB/mGFvhkt1uQ==}
+    engines: {node: '>=22.12.0 || >=20.19.0 <21.0.0', npm: '>=10'}
+    hasBin: true
 
   '@redocly/config@0.22.0':
     resolution: {integrity: sha512-gAy93Ddo01Z3bHuVdPWfCwzgfaYgMdaZPcfL7JZ7hWJoK9V0lXDbigTWkhiPFAaLWzbOJ+kbUQG1+XwIm0KRGQ==}
@@ -3350,6 +3358,8 @@ snapshots:
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
       uri-js-replace: 1.0.1
+
+  '@redocly/cli@2.54.2': {}
 
   '@redocly/config@0.22.0': {}
 

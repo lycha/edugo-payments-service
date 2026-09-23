@@ -78,10 +78,10 @@ flowchart TD
     IMPL(["implementation"])
     CR(["code review"])
 
-    SRC -->|prototype-harvest| INV
+    SRC -->|prototype-harvest skill| INV
     INV --> WS
-    WS -->|gap-interrogation-capture| DEC
-    DEC --> SPEC
+    WS -->|gap-interrogation-capture skill| DEC
+    DEC --> |spec-writer skill| SPEC
     SPEC --> API
     SPEC --> MIG
     API & MIG -->|agile-task-writer| TASK
