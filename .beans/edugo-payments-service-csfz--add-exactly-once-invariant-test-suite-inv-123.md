@@ -36,5 +36,10 @@ For a correctness system the invariant tests are the deliverable.
 ## Dependencies
 - Blocked by webhook ingest + relay.
 
+## Resolved decisions (tech spec, 2026-09-23)
+- End-to-end suite drives ingest (HTTP inject or handler) → `runInboxRelayOnce` against real Postgres, seeding a `payment_intent` per test so `extOrderId` resolves.
+- INV-2: same `(orderId, COMPLETED)` delivered twice → one PENDING row (ingest dedup) and exactly one PAYMENT (apply dedup). INV-1: balance == Σ ledger after apply. INV-3: an event whose `extOrderId` resolves no intent → no PAYMENT, row → DEAD.
+- Follows `test/payments/record-payment.int.test.ts` style (own account/keys per test).
+
 ## Definition of Done
 - [ ] All four assertions pass; suite runs in pnpm test

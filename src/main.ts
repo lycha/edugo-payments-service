@@ -9,7 +9,7 @@ async function main(): Promise<void> {
   startTelemetry({ serviceName: env.SERVICE_NAME, endpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT });
 
   const db = createDb(env.DATABASE_URL);
-  const container = buildContainer(db);
+  const container = buildContainer(db, { operatorWebhookSecret: env.OPERATOR_WEBHOOK_SECRET });
   const app = await buildServer(container);
 
   const shutdown = async (): Promise<void> => {

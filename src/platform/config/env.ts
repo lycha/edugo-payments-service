@@ -6,6 +6,9 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   SERVICE_NAME: z.string().default('edugo-payments-service'),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+  // HMAC secret for verifying operator webhooks (ADR-0006 — Secret Manager later,
+  // ASM-1). Never hardcoded; a dev/test default keeps local boot friction-free.
+  OPERATOR_WEBHOOK_SECRET: z.string().min(1).default('dev-operator-webhook-secret'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

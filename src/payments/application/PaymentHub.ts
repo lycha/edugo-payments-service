@@ -4,7 +4,6 @@ import { encodeChargeCursor } from '#payments/charges/domain/model/ChargeCursor'
 import {
   AccountNotFoundError,
   ChargeNotFoundError,
-  CurrencyMismatchError,
   DuplicateIdempotencyKeyError,
   EnrollmentNotFoundError,
 } from '#payments/ledger/domain/Errors';
@@ -13,6 +12,7 @@ import type { PaymentRepository } from '#payments/ledger/domain/port/PaymentRepo
 import type { ChargeRepository } from '#payments/charges/domain/port/ChargeRepository';
 import type { ChargeRecord } from '#payments/charges/domain/model/Charge';
 import type { ChargeStatus } from '#payments/charges/domain/model/ChargeStatus';
+import { recordAndAllocate } from './recordPayment';
 
 /** Default legal reason for VAT-exempt Polish tuition when no tax_rates row supplies one. */
 const PL_TUITION_EXEMPT_REASON = 'PL tuition — VAT exempt (art. 43 ust. 1 pkt 26 ustawy o VAT)';
@@ -64,47 +64,25 @@ export class PaymentHub {
 
     try {
       return await this.deps.unitOfWork.withTransaction(async (repos) => {
-        const repo = repos.payments;
-        if (!(await repo.accountExists(cmd.accountId))) {
+        if (!(await repos.payments.accountExists(cmd.accountId))) {
           throw new AccountNotFoundError(cmd.accountId);
         }
 
-        const replay = await this.tryReplay(repo, cmd);
-        if (replay) return replay;
-
-        // May throw DuplicateIdempotencyKeyError on a concurrent unique-violation.
-        // We do NOT catch it here: a 23505 aborts the whole Postgres transaction,
-        // so no further query on `repo` would succeed. It's handled below, after
-        // the failed transaction has rolled back, by reading the winner afresh.
-        const payment = await repo.insertPayment({
+        // Shared record-and-allocate core (idempotent; ledger-neutral allocation,
+        // INV-5/FR-9). The relay uses the same core so neither path double-records.
+        const result = await recordAndAllocate(repos, {
           accountId: cmd.accountId,
           amount,
           operatorReference: cmd.operatorReference,
           idempotencyKey: cmd.idempotencyKey,
         });
 
-        await repo.appendLedgerEntry({
-          accountId: cmd.accountId,
-          type: 'PAYMENT',
-          amount,
-          reference: payment.id,
-          paymentId: payment.id,
-        });
-
-        const balance = await repo.incrementBalance(cmd.accountId, amount);
-
-        // Ledger-neutral allocation (INV-5, FR-9): pay down open charges oldest-first
-        // in the SAME transaction. This writes payment_allocations rows and flips
-        // charge status only — it posts NO ledger entry and does not touch the
-        // balance (that was already moved by the CHARGE(−) and PAYMENT(+) entries).
-        await this.allocate(repos.charges, cmd.accountId, payment.id, amount);
-
         return {
-          paymentId: payment.id,
+          paymentId: result.paymentId,
           accountId: cmd.accountId,
-          balanceMinor: balance.amountMinor,
-          currency: balance.currency,
-          replayed: false,
+          balanceMinor: result.balance.amountMinor,
+          currency: result.balance.currency,
+          replayed: result.replayed,
         };
       });
     } catch (err) {
@@ -117,50 +95,6 @@ export class PaymentHub {
         if (replayed) return replayed;
       }
       throw err;
-    }
-  }
-
-  /**
-   * Allocates a payment across the account's open charges oldest-first. The
-   * charges are locked `FOR UPDATE` (AC-20, PR-008) so concurrent payments cannot
-   * over-allocate. A fully-covered charge transitions PENDING → SETTLED (AC-11).
-   * Any remainder is left as positive balance (credit, INV-5) — no entry is
-   * posted. Ledger-neutral: does not modify the balance.
-   */
-  private async allocate(
-    charges: ChargeRepository,
-    accountId: string,
-    paymentId: string,
-    payment: Money,
-  ): Promise<void> {
-    // Returns all PENDING charges for the account (unbounded). Safe for M1: open
-    // arrears per parent stay small (dunning / write-off cap them). If arrears can
-    // grow large before collection, bound this (allocate to the oldest K, or
-    // paginate the lock).
-    const openCharges = await charges.findOpenChargesByAccountForUpdate(accountId);
-    let remaining = payment.amountMinor;
-
-    for (const charge of openCharges) {
-      if (remaining <= 0n) break;
-      // App-enforced currency match (PR-S3); cannot occur under PLN-only M1.
-      if (charge.currency !== payment.currency) {
-        throw new CurrencyMismatchError(payment.currency, charge.currency);
-      }
-
-      const settled = await charges.sumAllocationsForCharge(charge.id);
-      const outstanding = charge.grossMinor - settled;
-      if (outstanding <= 0n) continue; // defensive: already covered
-
-      const applied = remaining < outstanding ? remaining : outstanding;
-      await charges.insertAllocation({
-        paymentId,
-        chargeId: charge.id,
-        amount: Money.of(applied, payment.currency),
-      });
-      if (applied >= outstanding) {
-        await charges.updateStatus(charge.id, 'SETTLED');
-      }
-      remaining -= applied;
     }
   }
 

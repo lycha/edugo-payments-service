@@ -33,6 +33,13 @@ Both the webhook ingest and the relay need a storage seam (the inbox) and a prov
 - HMAC secret comes from the Zod env/config loader, not source (PR-T3).
 - Optional split (PR-T4): OperatorEventDao and the PaymentOperator abstraction may ship as two tasks if it helps parallelism; both remain prerequisites of ingest + relay.
 
+## Resolved decisions (tech spec, 2026-09-23)
+- `PaymentOperator` port stays **framework/DB-free**: `verifySignature(rawBody: string, signature) → boolean` (HMAC-SHA256 over raw body, constant-time) + `parse(payload) → { operatorReference, extOrderId, status, amountMinor, currency }`. Account **resolution is a relay/repo step** (`PaymentRepository.findAccountByPaymentIntent(extOrderId)`), keeping the port DB-free — a refinement of "normalise resolves the account".
+- `parse` reads the amount as a **string → `BigInt`** (PayU `totalAmount` is a string in minor units); a non-string amount is malformed.
+- `MockPayUOperator` payload is PayU-shaped: `{ order: { orderId, extOrderId, status, currencyCode, totalAmount } }`. Export a `signPayU(rawBody, secret)` helper so tests sign identically.
+- `OperatorEventDao`: `insertReceived` (dedup-aware, 23505 → `{ duplicate: true }`), `claimDueOne` (`FOR UPDATE SKIP LOCKED`, oldest-first, LIMIT 1), `markProcessed/markFailed/markDead`. jsonb payload inserted via `JSON.stringify`.
+- Secret from Zod env loader `OPERATOR_WEBHOOK_SECRET` (default only for dev/test).
+
 ## Definition of Done
 - [ ] Reviewed; tests for verify + dedup + claim ordering + account resolution
 - [ ] Registered in the awilix Cradle (container.ts); full-contract boot test still passes (PR-T5)

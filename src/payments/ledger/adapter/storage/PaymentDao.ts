@@ -7,6 +7,8 @@ import { DuplicateIdempotencyKeyError } from '../../domain/Errors';
 
 export type Executor = Kysely<DB> | Transaction<DB>;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function isUniqueViolation(err: unknown): boolean {
   return (
     typeof err === 'object' &&
@@ -28,6 +30,38 @@ export class PaymentDao implements PaymentRepository {
       .where('id', '=', accountId)
       .executeTakeFirst();
     return row !== undefined;
+  }
+
+  async findAccountByPaymentIntent(
+    intentId: string,
+  ): Promise<{ accountId: string; amountMinor: bigint; currency: string; status: string } | null> {
+    // The correlation ref is an untrusted operator-echoed string. Guard the UUID
+    // shape in JS so a non-UUID resolves to "no match" (null) — rather than casting
+    // `id::text` in SQL, which would resolve correctly but defeat the PK index.
+    if (!UUID_RE.test(intentId)) return null;
+    const row = await this.db
+      .selectFrom('payment_intents')
+      .select(['account_id', 'amount_minor', 'currency', 'status'])
+      .where('id', '=', intentId)
+      .executeTakeFirst();
+    return row
+      ? {
+          accountId: row.account_id,
+          amountMinor: BigInt(row.amount_minor),
+          currency: row.currency,
+          status: row.status,
+        }
+      : null;
+  }
+
+  /** Mark an intent settled and link its payment (CONFIRMED). Run in the apply
+   *  transaction so it commits atomically with the ledger effect. */
+  async confirmPaymentIntent(intentId: string, paymentId: string): Promise<void> {
+    await this.db
+      .updateTable('payment_intents')
+      .set({ status: 'CONFIRMED', payment_id: paymentId })
+      .where('id', '=', intentId)
+      .execute();
   }
 
   async findPaymentByIdempotencyKey(key: string): Promise<{ id: string; accountId: string } | null> {
