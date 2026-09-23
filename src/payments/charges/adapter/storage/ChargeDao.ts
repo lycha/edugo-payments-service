@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import type { Selectable } from 'kysely';
+import type { Selectable, SqlBool } from 'kysely';
 import type { Charges } from '#generated/platform/db/schema';
 import type { ChargeRepository, TaxRateRow } from '../../domain/port/ChargeRepository';
 import type { ChargeRecord } from '../../domain/model/Charge';
@@ -165,24 +165,35 @@ export class ChargeDao implements ChargeRepository {
   async listChargesByAccount(
     accountId: string,
     opts: { status?: ChargeStatus; limit: number; cursor?: string },
-  ): Promise<ChargeRecord[]> {
-    let qb = this.db.selectFrom('charges').selectAll().where('account_id', '=', accountId);
-    if (opts.status) qb = qb.where('status', '=', opts.status);
+  ): Promise<Array<{ record: ChargeRecord; allocatedMinor: bigint }>> {
+    // Left-join the allocations and SUM per charge so outstanding comes back with
+    // the page in one query (no N+1). GROUP BY the PK is safe with selectAll.
+    // created_at is truncated to milliseconds for BOTH ordering and the keyset
+    // filter: the cursor round-trips through a JS Date (ms precision) while the
+    // column holds microseconds, so an untruncated comparison would re-return the
+    // boundary row. Ordering on the same truncated key keeps paging consistent.
+    const createdAtMs = sql`date_trunc('milliseconds', charges.created_at)`;
+    let qb = this.db
+      .selectFrom('charges')
+      .leftJoin('payment_allocations', 'payment_allocations.charge_id', 'charges.id')
+      .where('charges.account_id', '=', accountId);
+    if (opts.status) qb = qb.where('charges.status', '=', opts.status);
     if (opts.cursor) {
       const { createdAt, id } = decodeChargeCursor(opts.cursor);
-      qb = qb.where((eb) =>
-        eb.or([
-          eb('created_at', '>', createdAt),
-          eb.and([eb('created_at', '=', createdAt), eb('id', '>', id)]),
-        ]),
+      // Row-value keyset: (created_at_ms, id) > (cursor.created_at, cursor.id).
+      qb = qb.where(
+        sql<SqlBool>`(${createdAtMs}, charges.id) > (${createdAt}::timestamptz, ${id}::uuid)`,
       );
     }
     const rows = await qb
-      .orderBy('created_at', 'asc')
-      .orderBy('id', 'asc')
+      .selectAll('charges')
+      .select((eb) => eb.fn.coalesce(eb.fn.sum('payment_allocations.amount_minor'), sql<string>`0`).as('allocated_minor'))
+      .groupBy('charges.id')
+      .orderBy(createdAtMs, 'asc')
+      .orderBy('charges.id', 'asc')
       .limit(opts.limit)
       .execute();
-    return rows.map(toChargeRecord);
+    return rows.map((row) => ({ record: toChargeRecord(row), allocatedMinor: BigInt(row.allocated_minor) }));
   }
 
   async updateStatus(chargeId: string, status: ChargeStatus): Promise<void> {

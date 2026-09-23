@@ -56,11 +56,15 @@ export interface ChargeRepository {
    */
   findOpenChargesByAccountForUpdate(accountId: string): Promise<ChargeRecord[]>;
 
-  /** A page of an account's charges, oldest-first, optionally filtered by status. */
+  /**
+   * A page of an account's charges, oldest-first, optionally filtered by status,
+   * each paired with the amount already allocated to it — so the caller derives
+   * outstanding without a per-charge query (no N+1). Returns up to `limit` rows.
+   */
   listChargesByAccount(
     accountId: string,
     opts: { status?: ChargeStatus; limit: number; cursor?: string },
-  ): Promise<ChargeRecord[]>;
+  ): Promise<Array<{ record: ChargeRecord; allocatedMinor: bigint }>>;
 
   updateStatus(chargeId: string, status: ChargeStatus): Promise<void>;
 

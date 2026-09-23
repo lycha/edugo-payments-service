@@ -11,6 +11,7 @@ import {
   ChargeNotFoundError,
   DomainError,
   EnrollmentNotFoundError,
+  InvalidCursorError,
 } from '../../payments/ledger/domain/Errors';
 import { registerBearerAuth } from './security';
 
@@ -58,6 +59,9 @@ export async function buildServer(container: AwilixContainer<Cradle>): Promise<F
       err instanceof ChargeNotFoundError
     ) {
       return reply.code(404).type('application/problem+json').send(problem(404, 'Not found', err.message));
+    }
+    if (err instanceof InvalidCursorError) {
+      return reply.code(400).type('application/problem+json').send(problem(400, 'Invalid request', err.message));
     }
     if (err instanceof DomainError) {
       return reply.code(422).type('application/problem+json').send(problem(422, 'Domain rule violated', err.message));

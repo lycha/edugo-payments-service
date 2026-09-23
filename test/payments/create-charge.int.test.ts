@@ -127,6 +127,54 @@ describe('PaymentHub.createCharge', () => {
     expect(page.nextCursor).toBeNull();
   });
 
+  it('is idempotent under concurrency: two identical creates yield one charge + one entry', async () => {
+    const { accountId, enrollmentId } = await seedEnrollment();
+    const hub = container.resolve('paymentHub');
+    const cmd = { enrollmentId, netMinor: 15_000n, currency: 'PLN', idempotencyKey: randomUUID() };
+
+    // Fire both at once: one wins the unique constraint, the other hits a 23505
+    // that aborts its transaction and must resolve to the original as a replay.
+    const [a, b] = await Promise.all([hub.createCharge(cmd), hub.createCharge(cmd)]);
+
+    expect(a.view.record.id).toBe(b.view.record.id);
+    expect([a.replayed, b.replayed].filter(Boolean)).toHaveLength(1); // exactly one replay
+
+    const charges = await db.selectFrom('charges').select('id').where('account_id', '=', accountId).execute();
+    expect(charges).toHaveLength(1);
+    const entries = await ledgerFor(accountId);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.entry_type).toBe('CHARGE');
+  });
+
+  it('paginates oldest-first via keyset cursor without repeating or skipping rows', async () => {
+    const { accountId, enrollmentId } = await seedEnrollment();
+    const hub = container.resolve('paymentHub');
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const { view } = await hub.createCharge({ enrollmentId, netMinor: 10_000n, currency: 'PLN', idempotencyKey: randomUUID() });
+      ids.push(view.record.id);
+      await new Promise((r) => setTimeout(r, 5)); // distinct created_at
+    }
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let guard = 0; guard < 10; guard++) {
+      const page = await hub.listCharges(accountId, { limit: 1, cursor });
+      seen.push(...page.items.map((v) => v.record.id));
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    // Exactly the three charges, oldest-first, each once (proves the ms-precision keyset).
+    expect(seen).toEqual(ids);
+  });
+
+  it('rejects a malformed pagination cursor (InvalidCursorError → 400)', async () => {
+    const { accountId } = await seedEnrollment();
+    await expect(
+      container.resolve('paymentHub').listCharges(accountId, { limit: 10, cursor: 'not-a-cursor' }),
+    ).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
+  });
+
   it('rejects a charge against an unknown enrollment (→ EnrollmentNotFoundError / 404)', async () => {
     const hub = container.resolve('paymentHub');
     await expect(

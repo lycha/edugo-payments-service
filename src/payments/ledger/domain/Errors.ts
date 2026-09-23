@@ -49,6 +49,14 @@ export class ChargeNotFoundError extends DomainError {
   }
 }
 
+/** Raised when a pagination cursor is malformed (→ 400, bad request). */
+export class InvalidCursorError extends DomainError {
+  readonly code = 'INVALID_CURSOR';
+  constructor() {
+    super('Invalid pagination cursor');
+  }
+}
+
 /** Raised when a tax breakdown would violate INV-7 (`gross == net + tax`) or omit
  *  a required legal reason for an EXEMPT/ZERO_RATED line (AC-33). */
 export class InvalidTaxBreakdownError extends DomainError {

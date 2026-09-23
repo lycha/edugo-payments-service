@@ -62,56 +62,62 @@ export class PaymentHub {
   async recordPayment(cmd: RecordPaymentCommand): Promise<RecordPaymentResult> {
     const amount = Money.of(cmd.amountMinor, cmd.currency);
 
-    return this.deps.unitOfWork.withTransaction(async (repos) => {
-      const repo = repos.payments;
-      if (!(await repo.accountExists(cmd.accountId))) {
-        throw new AccountNotFoundError(cmd.accountId);
-      }
+    try {
+      return await this.deps.unitOfWork.withTransaction(async (repos) => {
+        const repo = repos.payments;
+        if (!(await repo.accountExists(cmd.accountId))) {
+          throw new AccountNotFoundError(cmd.accountId);
+        }
 
-      const replay = await this.tryReplay(repo, cmd);
-      if (replay) return replay;
+        const replay = await this.tryReplay(repo, cmd);
+        if (replay) return replay;
 
-      let payment: { id: string };
-      try {
-        payment = await repo.insertPayment({
+        // May throw DuplicateIdempotencyKeyError on a concurrent unique-violation.
+        // We do NOT catch it here: a 23505 aborts the whole Postgres transaction,
+        // so no further query on `repo` would succeed. It's handled below, after
+        // the failed transaction has rolled back, by reading the winner afresh.
+        const payment = await repo.insertPayment({
           accountId: cmd.accountId,
           amount,
           operatorReference: cmd.operatorReference,
           idempotencyKey: cmd.idempotencyKey,
         });
-      } catch (err) {
-        // Concurrent request won the unique constraint — treat as replay.
-        if (err instanceof DuplicateIdempotencyKeyError) {
-          const replayed = await this.tryReplay(repo, cmd);
-          if (replayed) return replayed;
-        }
-        throw err;
-      }
 
-      await repo.appendLedgerEntry({
-        accountId: cmd.accountId,
-        type: 'PAYMENT',
-        amount,
-        reference: payment.id,
-        paymentId: payment.id,
+        await repo.appendLedgerEntry({
+          accountId: cmd.accountId,
+          type: 'PAYMENT',
+          amount,
+          reference: payment.id,
+          paymentId: payment.id,
+        });
+
+        const balance = await repo.incrementBalance(cmd.accountId, amount);
+
+        // Ledger-neutral allocation (INV-5, FR-9): pay down open charges oldest-first
+        // in the SAME transaction. This writes payment_allocations rows and flips
+        // charge status only — it posts NO ledger entry and does not touch the
+        // balance (that was already moved by the CHARGE(−) and PAYMENT(+) entries).
+        await this.allocate(repos.charges, cmd.accountId, payment.id, amount);
+
+        return {
+          paymentId: payment.id,
+          accountId: cmd.accountId,
+          balanceMinor: balance.amountMinor,
+          currency: balance.currency,
+          replayed: false,
+        };
       });
-
-      const balance = await repo.incrementBalance(cmd.accountId, amount);
-
-      // Ledger-neutral allocation (INV-5, FR-9): pay down open charges oldest-first
-      // in the SAME transaction. This writes payment_allocations rows and flips
-      // charge status only — it posts NO ledger entry and does not touch the
-      // balance (that was already moved by the CHARGE(−) and PAYMENT(+) entries).
-      await this.allocate(repos.charges, cmd.accountId, payment.id, amount);
-
-      return {
-        paymentId: payment.id,
-        accountId: cmd.accountId,
-        balanceMinor: balance.amountMinor,
-        currency: balance.currency,
-        replayed: false,
-      };
-    });
+    } catch (err) {
+      // A concurrent request won the unique constraint — the original was recorded
+      // by that request. Return it as a replay from a fresh transaction.
+      if (err instanceof DuplicateIdempotencyKeyError) {
+        const replayed = await this.deps.unitOfWork.withTransaction((repos) =>
+          this.tryReplay(repos.payments, cmd),
+        );
+        if (replayed) return replayed;
+      }
+      throw err;
+    }
   }
 
   /**
@@ -127,6 +133,10 @@ export class PaymentHub {
     paymentId: string,
     payment: Money,
   ): Promise<void> {
+    // Returns all PENDING charges for the account (unbounded). Safe for M1: open
+    // arrears per parent stay small (dunning / write-off cap them). If arrears can
+    // grow large before collection, bound this (allocate to the oldest K, or
+    // paginate the lock).
     const openCharges = await charges.findOpenChargesByAccountForUpdate(accountId);
     let remaining = payment.amountMinor;
 
@@ -167,25 +177,29 @@ export class PaymentHub {
   async createCharge(cmd: CreateChargeCommand): Promise<{ view: ChargeView; replayed: boolean }> {
     const net = Money.of(cmd.netMinor, cmd.currency);
 
-    return this.deps.unitOfWork.withTransaction(async (repos) => {
-      const charges = repos.charges;
+    try {
+      return await this.deps.unitOfWork.withTransaction(async (repos) => {
+        const charges = repos.charges;
 
-      const owner = await charges.findAccountByEnrollment(cmd.enrollmentId);
-      if (!owner) throw new EnrollmentNotFoundError(cmd.enrollmentId);
+        const owner = await charges.findAccountByEnrollment(cmd.enrollmentId);
+        if (!owner) throw new EnrollmentNotFoundError(cmd.enrollmentId);
 
-      const existing = await charges.findChargeByIdempotencyKey(cmd.idempotencyKey);
-      if (existing) return { view: await this.toView(charges, existing), replayed: true };
+        const existing = await charges.findChargeByIdempotencyKey(cmd.idempotencyKey);
+        if (existing) return { view: await this.toView(charges, existing), replayed: true };
 
-      const rate = await charges.resolveTaxRate({
-        jurisdiction: 'PL',
-        category: 'TUITION',
-        on: new Date(),
-      });
-      const tax = TaxBreakdown.exempt(net, 'PL', rate?.legalReason ?? PL_TUITION_EXEMPT_REASON);
+        // M1 is EXEMPT-only: the lookup proves the wiring and sources a legal
+        // reason, but `rate`/`treatment` are intentionally NOT applied — every
+        // charge resolves to EXEMPT until the effective-dated engine lands (NG-A).
+        const rate = await charges.resolveTaxRate({
+          jurisdiction: 'PL',
+          category: 'TUITION',
+          on: new Date(),
+        });
+        const tax = TaxBreakdown.exempt(net, 'PL', rate?.legalReason ?? PL_TUITION_EXEMPT_REASON);
 
-      let inserted: { id: string };
-      try {
-        inserted = await charges.insertCharge({
+        // May throw DuplicateIdempotencyKeyError; not caught here (a 23505 aborts the
+        // transaction). Handled below from a fresh transaction after rollback.
+        const inserted = await charges.insertCharge({
           accountId: owner.accountId,
           enrollmentId: cmd.enrollmentId,
           studentId: owner.studentId,
@@ -193,31 +207,35 @@ export class PaymentHub {
           tax,
           idempotencyKey: cmd.idempotencyKey,
         });
-      } catch (err) {
-        // Concurrent request won the unique constraint — treat as replay.
-        if (err instanceof DuplicateIdempotencyKeyError) {
-          const replayed = await charges.findChargeByIdempotencyKey(cmd.idempotencyKey);
-          if (replayed) return { view: await this.toView(charges, replayed), replayed: true };
-        }
-        throw err;
-      }
 
-      // Post the CHARGE for the GROSS as a negative (arrears) entry, and move the
-      // balance — atomically with the charge insert (AC-30, sign convention).
-      const grossArrears = Money.of(tax.grossMinor, cmd.currency).negate();
-      await repos.payments.appendLedgerEntry({
-        accountId: owner.accountId,
-        type: 'CHARGE',
-        amount: grossArrears,
-        reference: inserted.id,
-        paymentId: null,
+        // Post the CHARGE for the GROSS as a negative (arrears) entry, and move the
+        // balance — atomically with the charge insert (AC-30, sign convention).
+        const grossArrears = Money.of(tax.grossMinor, cmd.currency).negate();
+        await repos.payments.appendLedgerEntry({
+          accountId: owner.accountId,
+          type: 'CHARGE',
+          amount: grossArrears,
+          reference: inserted.id,
+          paymentId: null,
+        });
+        await repos.payments.incrementBalance(owner.accountId, grossArrears);
+
+        const record = await charges.findChargeById(inserted.id);
+        if (!record) throw new ChargeNotFoundError(inserted.id); // unreachable — just inserted
+        return { view: await this.toView(charges, record), replayed: false };
       });
-      await repos.payments.incrementBalance(owner.accountId, grossArrears);
-
-      const record = await charges.findChargeById(inserted.id);
-      if (!record) throw new ChargeNotFoundError(inserted.id); // unreachable — just inserted
-      return { view: await this.toView(charges, record), replayed: false };
-    });
+    } catch (err) {
+      // A concurrent request won the unique constraint — return the original charge
+      // it created, read from a fresh transaction.
+      if (err instanceof DuplicateIdempotencyKeyError) {
+        return await this.deps.unitOfWork.withTransaction(async ({ charges }) => {
+          const existing = await charges.findChargeByIdempotencyKey(cmd.idempotencyKey);
+          if (existing) return { view: await this.toView(charges, existing), replayed: true };
+          throw err; // winner not visible — should not happen
+        });
+      }
+      throw err;
+    }
   }
 
   /** Returns a charge and its live outstanding, or throws ChargeNotFoundError. */
@@ -236,10 +254,18 @@ export class PaymentHub {
   ): Promise<{ items: ChargeView[]; nextCursor: string | null }> {
     return this.deps.unitOfWork.withTransaction(async ({ charges }) => {
       if (!(await charges.accountExists(accountId))) throw new AccountNotFoundError(accountId);
-      const records = await charges.listChargesByAccount(accountId, opts);
-      const items = await Promise.all(records.map((r) => this.toView(charges, r)));
-      const last = records[records.length - 1];
-      const nextCursor = records.length === opts.limit && last ? encodeChargeCursor(last) : null;
+      // Fetch one extra row so we only emit a cursor when a further page truly
+      // exists (no trailing empty page). Each row carries its allocated total, so
+      // outstanding is derived without a per-item query (no N+1).
+      const rows = await charges.listChargesByAccount(accountId, { ...opts, limit: opts.limit + 1 });
+      const hasMore = rows.length > opts.limit;
+      const page = hasMore ? rows.slice(0, opts.limit) : rows;
+      const items: ChargeView[] = page.map(({ record, allocatedMinor }) => ({
+        record,
+        owedMinor: -(record.grossMinor - allocatedMinor),
+      }));
+      const lastRecord = page[page.length - 1]?.record;
+      const nextCursor = hasMore && lastRecord ? encodeChargeCursor(lastRecord) : null;
       return { items, nextCursor };
     });
   }
