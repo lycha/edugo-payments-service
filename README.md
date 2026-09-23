@@ -91,3 +91,9 @@ curl -X POST http://localhost:3000/api/v1/payments \
 → `UnitOfWork` (`PaymentRepositoryDB` opens a Kysely transaction) → `PaymentDao` appends a
 `PAYMENT` ledger entry and updates the materialized balance atomically. Idempotent via
 `Idempotency-Key`. Covered by an integration test against real Postgres.
+
+## License
+
+© 2026 Krzysztof Jackowski. **All rights reserved** — proprietary; no use without prior
+written consent. See [`LICENSE`](LICENSE). Third-party dependencies remain under their own
+licenses (MIT / Apache-2.0) — see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
