@@ -1,4 +1,4 @@
-import type { Money } from '../model/Money';
+import type { Money } from '#payments/ledger/domain/model/Money';
 import type { ChargeStatus } from '../model/ChargeStatus';
 import type { TaxBreakdown, TaxTreatment } from '../model/TaxBreakdown';
 import type { ChargeRecord } from '../model/Charge';

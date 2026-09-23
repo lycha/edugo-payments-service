@@ -5,9 +5,10 @@ import type { ChargeRepository, TaxRateRow } from '../../domain/port/ChargeRepos
 import type { ChargeRecord } from '../../domain/model/Charge';
 import type { ChargeStatus } from '../../domain/model/ChargeStatus';
 import type { TaxBreakdown, TaxTreatment } from '../../domain/model/TaxBreakdown';
-import { Money } from '../../domain/model/Money';
-import { DuplicateIdempotencyKeyError } from '../../domain/Errors';
-import type { Executor } from './PaymentDao';
+import { Money } from '#payments/ledger/domain/model/Money';
+import { DuplicateIdempotencyKeyError } from '#payments/ledger/domain/Errors';
+import { decodeChargeCursor } from '../../domain/model/ChargeCursor';
+import type { Executor } from '#payments/ledger/adapter/storage/PaymentDao';
 
 function isUniqueViolation(err: unknown): boolean {
   return (
@@ -36,16 +37,6 @@ function toChargeRecord(row: Selectable<Charges>): ChargeRecord {
     createdAt: row.created_at,
   };
 }
-
-/** Cursor over `(created_at, id)` for keyset pagination of an account's charges. */
-function encodeCursor(row: ChargeRecord): string {
-  return Buffer.from(`${row.createdAt.toISOString()}|${row.id}`, 'utf8').toString('base64url');
-}
-function decodeCursor(cursor: string): { createdAt: Date; id: string } {
-  const [iso, id] = Buffer.from(cursor, 'base64url').toString('utf8').split('|');
-  return { createdAt: new Date(iso ?? ''), id: id ?? '' };
-}
-export { encodeCursor };
 
 /** Kysely data-access object implementing the ChargeRepository port, bound to a
  *  single executor (connection or transaction). Conventions follow PaymentDao:
@@ -178,7 +169,7 @@ export class ChargeDao implements ChargeRepository {
     let qb = this.db.selectFrom('charges').selectAll().where('account_id', '=', accountId);
     if (opts.status) qb = qb.where('status', '=', opts.status);
     if (opts.cursor) {
-      const { createdAt, id } = decodeCursor(opts.cursor);
+      const { createdAt, id } = decodeChargeCursor(opts.cursor);
       qb = qb.where((eb) =>
         eb.or([
           eb('created_at', '>', createdAt),

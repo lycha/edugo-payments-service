@@ -1,5 +1,5 @@
 import type { PaymentRepository } from './PaymentRepository';
-import type { ChargeRepository } from './ChargeRepository';
+import type { ChargeRepository } from '#payments/charges/domain/port/ChargeRepository';
 
 /**
  * Transaction-bound repository bundle. Both repos share the *same* database

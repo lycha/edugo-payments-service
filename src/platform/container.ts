@@ -1,8 +1,8 @@
 import { createContainer, asClass, asValue, InjectionMode, type AwilixContainer } from 'awilix';
 import type { Kysely } from 'kysely';
 import type { DB } from '#generated/platform/db/schema';
-import { PaymentRepositoryDB } from '../payments/adapter/storage/PaymentRepositoryDB';
-import { PaymentHub } from '../payments/domain/PaymentHub';
+import { PaymentRepositoryDB } from '../payments/ledger/adapter/storage/PaymentRepositoryDB';
+import { PaymentHub } from '../payments/application/PaymentHub';
 
 export interface Cradle {
   db: Kysely<DB>;

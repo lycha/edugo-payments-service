@@ -4,10 +4,10 @@ import type { Kysely } from 'kysely';
 import { startTestDatabase, type TestDatabase } from '../setup/postgres';
 import { createDb } from '../../src/platform/db/database';
 import type { DB } from '#generated/platform/db/schema';
-import { ChargeDao } from '../../src/payments/adapter/storage/ChargeDao';
-import { TaxBreakdown } from '../../src/payments/domain/model/TaxBreakdown';
-import { Money } from '../../src/payments/domain/model/Money';
-import { DuplicateIdempotencyKeyError } from '../../src/payments/domain/Errors';
+import { ChargeDao } from '#payments/charges/adapter/storage/ChargeDao';
+import { TaxBreakdown } from '#payments/charges/domain/model/TaxBreakdown';
+import { Money } from '#payments/ledger/domain/model/Money';
+import { DuplicateIdempotencyKeyError } from '#payments/ledger/domain/Errors';
 
 let testDb: TestDatabase;
 let db: Kysely<DB>;

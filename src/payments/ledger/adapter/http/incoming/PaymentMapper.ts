@@ -1,10 +1,10 @@
 import type { components } from '#generated/payments/adapter/http/incoming/openapi';
-import type { RecordPaymentCommand, RecordPaymentResult } from '../../../domain/PaymentHub';
+import type { RecordPaymentCommand, RecordPaymentResult } from '#payments/application/PaymentHub';
 
 type RecordPaymentBody = components['schemas']['RecordPaymentRequest'];
 type PaymentRecordedDto = components['schemas']['PaymentRecorded'];
 
-/** Maps between transport DTOs (generated from OpenAPI) and domain commands/results. */
+/** Maps between payment transport DTOs (generated from OpenAPI) and domain commands/results. */
 export const PaymentMapper = {
   toRecordCommand(body: RecordPaymentBody, idempotencyKey: string): RecordPaymentCommand {
     return {

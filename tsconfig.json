@@ -5,7 +5,8 @@
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {
-      "#generated/*": [".generated/*"]
+      "#generated/*": [".generated/*"],
+      "#payments/*": ["./src/payments/*"]
     },
     "lib": ["ES2022"],
     "types": ["node"],

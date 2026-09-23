@@ -37,13 +37,23 @@ under `db/migrations/`. Then re-run codegen.
 
 ## Architecture
 
-Hexagonal / DDD, organized **per bounded context**. Currently one context: `src/payments/`.
+Hexagonal / DDD. `src/payments/` is the **payments service** (one bounded context / shared ledger),
+organized into **side-by-side sub-domains**, each with the same `domain/` + `adapter/` tree. A single
+application orchestrator coordinates them over one transaction. Sub-domains import each other through the
+`#payments/*` subpath alias (kept in sync across `package.json` `imports`, `tsconfig.json` `paths`, and
+`vitest.config.ts` alias — same rule as `#generated/*`), so cross-context imports are depth-independent.
 
-- `src/payments/domain/` — framework-free core. `PaymentHub` is the use-case facade; `model/` holds
-  value objects (`Money`, `LedgerEntryType`); `port/` holds driven-port interfaces (`PaymentRepository`,
-  `UnitOfWork`); `Errors.ts` holds `DomainError` subclasses. The domain depends on **no** framework or DB type.
-- `src/payments/adapter/` — `http/incoming/` (Fastify handlers + `PaymentMapper` DTO↔domain) and
-  `storage/` (`PaymentRepositoryDB` implements `UnitOfWork`; `PaymentDao` implements `PaymentRepository` over Kysely).
+- `src/payments/ledger/` — the **shared kernel**: framework-free core owning money, the ledger, the balance,
+  and payment recording. `domain/model/` (`Money`, `LedgerEntryType`), `domain/port/` (`PaymentRepository`,
+  `UnitOfWork` + `RepositoryBundle`), `domain/Errors.ts` (the whole `DomainError` hierarchy), and
+  `adapter/` (`PaymentDao`; `PaymentRepositoryDB` implements `UnitOfWork`; `PaymentApiImpl`/`PaymentMapper`
+  for `recordPayment`). The domain depends on **no** framework or DB type.
+- `src/payments/charges/` — the **charges** sub-domain: `domain/model/` (`Charge`, `ChargeStatus`,
+  `TaxBreakdown`, `ChargeCursor`), `domain/port/` (`ChargeRepository`), and `adapter/` (`ChargeDao`;
+  `ChargeApiImpl`/`ChargeMapper` for `createCharge`/`getCharge`/`listCharges`). Depends on the ledger kernel.
+- `src/payments/application/` — `PaymentHub`, the **single orchestrator**. It injects the ledger + charges
+  ports (via the `UnitOfWork` bundle) and wraps each use case in one transaction. New sub-domains (dunning,
+  invoices, reconciliation…) get their own `charges/`-shaped tree when their epics start.
 - `src/platform/` — non-domain bootstrap only: `config/env.ts` (Zod-validated env), `db/database.ts`,
   `http/server.ts`, `observability/telemetry.ts`, and `container.ts` (Awilix composition root).
 
@@ -51,10 +61,12 @@ Hexagonal / DDD, organized **per bounded context**. Currently one context: `src/
 single `deps` object (e.g. `constructor(private readonly deps: { unitOfWork: UnitOfWork })`); the
 `Cradle` interface in `container.ts` is the registry. Adding a wired class means registering it there.
 
-**Request flow** (the one vertical slice): `POST /api/v1/payments` → `fastify-openapi-glue` matches
-`operationId: recordPayment` → `PaymentApiImpl.recordPayment` → `PaymentMapper` → `PaymentHub.recordPayment`
-→ `UnitOfWork.withTransaction` opens **one Kysely transaction** and hands the callback a transaction-bound
-`PaymentDao`. Inside that transaction the ledger entry is appended and the balance updated together.
+**Request flow**: e.g. `POST /api/v1/charges` → `fastify-openapi-glue` matches `operationId: createCharge`
+→ `ChargeApiImpl.createCharge` → `ChargeMapper` → `PaymentHub.createCharge` → `UnitOfWork.withTransaction`
+opens **one Kysely transaction** and hands the callback a transaction-bound **repository bundle
+`{ payments, charges }`** (`PaymentDao` + `ChargeDao` on the same trx). Inside that transaction the charge
+is inserted and the `CHARGE` ledger entry + balance update happen together. `recordPayment` follows the
+same shape via `PaymentApiImpl`.
 
 **Domain rules to preserve:**
 - **Money is integer minor units held as `bigint`** — never floats. Postgres `bigint` columns round-trip
@@ -67,8 +79,11 @@ single `deps` object (e.g. `constructor(private readonly deps: { unitOfWork: Uni
   unique-violation (`23505` → `DuplicateIdempotencyKeyError`) as a replay.
 
 **Error mapping** is centralized in `src/platform/http/server.ts` `setErrorHandler`: `AccountNotFoundError`
-→ 404, other `DomainError` → 422, ajv validation errors → 400, else 500 — all as `application/problem+json`.
-New domain errors surface correctly only if mapped there.
+/ `EnrollmentNotFoundError` / `ChargeNotFoundError` → 404, other `DomainError` → 422, ajv validation errors
+→ 400, else 500 — all as `application/problem+json`. New domain errors surface correctly only if mapped
+there. **The handler is registered _before_ `app.register(openapiGlue, …)`** — glue mounts routes in a
+child encapsulation context that snapshots the parent error handler at creation, so a handler set afterward
+is not inherited and routes fall back to Fastify's default 500.
 
 ## Testing
 

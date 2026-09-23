@@ -1,5 +1,5 @@
-import { InvalidTaxBreakdownError } from '../Errors';
-import type { Money } from './Money';
+import { InvalidTaxBreakdownError } from '#payments/ledger/domain/Errors';
+import type { Money } from '#payments/ledger/domain/model/Money';
 
 export type TaxTreatment = 'STANDARD' | 'REDUCED' | 'ZERO_RATED' | 'EXEMPT';
 

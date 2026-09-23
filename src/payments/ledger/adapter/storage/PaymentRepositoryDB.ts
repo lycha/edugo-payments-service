@@ -2,7 +2,7 @@ import type { Kysely } from 'kysely';
 import type { DB } from '#generated/platform/db/schema';
 import type { UnitOfWork, RepositoryBundle } from '../../domain/port/UnitOfWork';
 import { PaymentDao } from './PaymentDao';
-import { ChargeDao } from './ChargeDao';
+import { ChargeDao } from '#payments/charges/adapter/storage/ChargeDao';
 
 /**
  * Storage adapter implementing the UnitOfWork port. Opens one Kysely transaction

@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '#generated': path.resolve(__dirname, '.generated'),
+      '#payments': path.resolve(__dirname, 'src/payments'),
     },
   },
   test: {
